@@ -38,6 +38,7 @@ simiu group "D:/path/to/artist_pack" --apply --mode move
 9. 可回滚：`--apply` 时写入 undo 日志，支持恢复。
 10. 配置支持：可通过 `simiu.toml` 自定义分组目录前缀。
 11. 性能优化：默认启用特征提取并行与比对剪枝，可在配置中调节并行度。
+12. 去重处理：默认跳过以 `name_prefix` 开头的目录（视为已处理，避免重复嵌套）。
 
 ## 命令引导
 

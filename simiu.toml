@@ -1,3 +1,7 @@
 [group]
 # Group folder naming prefix. Final name format: <name_prefix>__set_001
 name_prefix = "simi_"
+
+[performance]
+# 0 means auto. You can set e.g. 8 or 12 for large folders.
+max_workers = 16

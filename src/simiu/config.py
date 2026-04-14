@@ -39,10 +39,16 @@ def _candidate_config_paths(root: Path, explicit: str | None) -> list[Path]:
     if explicit:
         return [Path(explicit).expanduser()]
 
+    # Repository/package-local defaults (works even if command is run outside project cwd).
+    package_repo = Path(__file__).resolve().parents[2]
+    package_dir = Path(__file__).resolve().parent
+
     candidates = [
         Path.cwd() / "simiu.toml",
         root / "simiu.toml",
         root / ".simiu.toml",
+        package_repo / "simiu.toml",
+        package_dir / "simiu.toml",
     ]
 
     result: list[Path] = []

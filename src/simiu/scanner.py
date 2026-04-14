@@ -21,16 +21,25 @@ def folder_depth(root: Path, folder: Path) -> int:
         return len(folder.parts)
 
 
-def should_skip_directory(folder: Path) -> bool:
+def should_skip_directory(folder: Path, name_prefix: str | None = None) -> bool:
     lowered = folder.name.lower()
     if lowered.startswith(".simiu-"):
         return True
     if AUTO_GROUP_MARKER in lowered:
         return True
+    if name_prefix:
+        prefix = name_prefix.strip().lower()
+        if prefix and lowered.startswith(prefix):
+            return True
     return False
 
 
-def collect_folder_batches(root: Path, recursive: bool, scan_order: str) -> list[tuple[Path, list[Path]]]:
+def collect_folder_batches(
+    root: Path,
+    recursive: bool,
+    scan_order: str,
+    name_prefix: str | None = None,
+) -> list[tuple[Path, list[Path]]]:
     if not recursive:
         images = collect_images_in_dir(root)
         return [(root, images)] if images else []
@@ -40,7 +49,7 @@ def collect_folder_batches(root: Path, recursive: bool, scan_order: str) -> list
 
     batches: list[tuple[Path, list[Path]]] = []
     for folder in dirs:
-        if should_skip_directory(folder):
+        if should_skip_directory(folder, name_prefix=name_prefix):
             continue
         images = collect_images_in_dir(folder)
         if images:
@@ -55,8 +64,10 @@ def collect_folder_batches(root: Path, recursive: bool, scan_order: str) -> list
     return batches
 
 
-def has_images_in_children(root: Path) -> bool:
+def has_images_in_children(root: Path, name_prefix: str | None = None) -> bool:
     for p in root.rglob("*"):
+        if p.is_dir() and should_skip_directory(p, name_prefix=name_prefix):
+            continue
         if p.is_file() and p.suffix.lower() in IMAGE_EXTS:
             return True
     return False

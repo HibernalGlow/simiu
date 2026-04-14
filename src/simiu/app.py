@@ -68,15 +68,29 @@ def group_command(
     app_config = load_config(root=root, config_path=config)
     if app_config.source_path is not None:
         console.print(f"[blue]已加载配置: {escape(str(app_config.source_path))}[/blue]")
+    console.print(
+        f"[blue]配置生效: name_prefix={escape(app_config.group.name_prefix)}, "
+        f"max_workers={app_config.performance.max_workers}[/blue]"
+    )
 
     show_root_panel(console, root, recursive, scan_order)
 
-    folder_batches = collect_folder_batches(root, recursive=recursive, scan_order=scan_order)
-    if not folder_batches and not recursive and has_images_in_children(root):
+    folder_batches = collect_folder_batches(
+        root,
+        recursive=recursive,
+        scan_order=scan_order,
+        name_prefix=app_config.group.name_prefix,
+    )
+    if not folder_batches and not recursive and has_images_in_children(root, name_prefix=app_config.group.name_prefix):
         if Confirm.ask("当前目录无图片，但子目录有图片，是否启用递归后重试", default=True):
             recursive = True
             show_root_panel(console, root, recursive, scan_order)
-            folder_batches = collect_folder_batches(root, recursive=True, scan_order=scan_order)
+            folder_batches = collect_folder_batches(
+                root,
+                recursive=True,
+                scan_order=scan_order,
+                name_prefix=app_config.group.name_prefix,
+            )
 
     if not folder_batches:
         console.print("[yellow]未找到图片文件[/yellow]")
