@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from io import BytesIO
 import os
@@ -248,6 +248,7 @@ def _convert_one_archive(
     duration_ms: int,
     loop: int,
     quality: int,
+    webp_method: int,
     overwrite: bool,
 ) -> ConvertResult:
     fmt = anim_format.lower()
@@ -288,7 +289,7 @@ def _convert_one_archive(
             duration=duration_ms,
             loop=loop,
             quality=quality,
-            method=6,
+            method=webp_method,
             lossless=False,
         )
     else:
@@ -337,6 +338,7 @@ def _run_make(
     duration_ms: int | None,
     loop: int | None,
     quality: int | None,
+    webp_method: int | None,
     name_prefix: str | None,
     name_template: str | None,
     max_workers: int | None,
@@ -351,6 +353,7 @@ def _run_make(
     effective_duration_ms = duration_ms if duration_ms is not None else app_config.output.duration_ms
     effective_loop = loop if loop is not None else app_config.output.loop
     effective_quality = quality if quality is not None else app_config.output.quality
+    effective_webp_method = webp_method if webp_method is not None else app_config.output.webp_method
     effective_prefix = name_prefix if name_prefix is not None else app_config.naming.prefix
     effective_template = name_template if name_template is not None else app_config.naming.template
 
@@ -369,6 +372,9 @@ def _run_make(
         raise typer.Exit(2)
     if effective_quality < 1 or effective_quality > 100:
         console.print("[red]quality 必须在 1-100[/red]")
+        raise typer.Exit(2)
+    if effective_webp_method < 0 or effective_webp_method > 6:
+        console.print("[red]webp-method 必须在 0-6[/red]")
         raise typer.Exit(2)
 
     raw_inputs: list[Path] = [Path(p) for p in archives]
@@ -421,6 +427,7 @@ def _run_make(
                     duration_ms=effective_duration_ms,
                     loop=effective_loop,
                     quality=effective_quality,
+                    webp_method=effective_webp_method,
                     overwrite=overwrite,
                 )
                 ok += 1
@@ -433,7 +440,7 @@ def _run_make(
                 console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
     else:
         future_map = {}
-        with ThreadPoolExecutor(max_workers=workers) as executor:
+        with ProcessPoolExecutor(max_workers=workers) as executor:
             for archive_path in archives_found:
                 output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix)
                 fut = executor.submit(
@@ -444,6 +451,7 @@ def _run_make(
                     effective_duration_ms,
                     effective_loop,
                     effective_quality,
+                    effective_webp_method,
                     overwrite,
                 )
                 future_map[fut] = archive_path
@@ -500,6 +508,7 @@ def _interactive_entry() -> None:
     duration_ms = int(Prompt.ask("每帧时长毫秒", default=str(app_config.output.duration_ms)))
     loop = int(Prompt.ask("循环次数（0 为无限）", default=str(app_config.output.loop)))
     quality = int(Prompt.ask("webp 质量（1-100）", default=str(app_config.output.quality)))
+    webp_method = int(Prompt.ask("webp 编码速度档位（0-6，越低越快）", default=str(app_config.output.webp_method)))
     workers = int(Prompt.ask("并行线程数（0 自动）", default=str(app_config.performance.max_workers)))
     name_prefix = Prompt.ask("输出名前缀", default=app_config.naming.prefix)
     name_template = Prompt.ask("命名模板（可用 {prefix} {stem} {archive} {parent}）", default=app_config.naming.template)
@@ -518,6 +527,7 @@ def _interactive_entry() -> None:
         duration_ms=duration_ms,
         loop=loop,
         quality=quality,
+        webp_method=webp_method,
         name_prefix=name_prefix,
         name_template=name_template,
         max_workers=workers,
@@ -538,6 +548,7 @@ def make_command(
     duration_ms: int | None = typer.Option(None, "--duration", help="每帧时长（毫秒），默认读取配置"),
     loop: int | None = typer.Option(None, "--loop", help="循环次数，0 为无限，默认读取配置"),
     quality: int | None = typer.Option(None, "--quality", help="webp 质量（1-100）"),
+    webp_method: int | None = typer.Option(None, "--webp-method", help="webp 编码档位 0-6，越低越快"),
     max_workers: int | None = typer.Option(None, "--max-workers", help="并行线程数，默认读取配置，0 自动"),
     name_prefix: str | None = typer.Option(None, "--name-prefix", help="输出名前缀，默认来自配置"),
     name_template: str | None = typer.Option(None, "--name-template", help="命名模板，默认来自配置"),
@@ -554,6 +565,7 @@ def make_command(
         duration_ms=duration_ms,
         loop=loop,
         quality=quality,
+        webp_method=webp_method,
         name_prefix=name_prefix,
         name_template=name_template,
         max_workers=max_workers,

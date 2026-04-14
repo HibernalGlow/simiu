@@ -2,6 +2,8 @@
 # gif | webp | apng | auto
 format = "webp"
 quality = 85
+# webp 编码档位 0-6，越低越快
+webp_method = 4
 # 每帧时长（毫秒）
 duration_ms = 120
 # 循环次数，0 为无限

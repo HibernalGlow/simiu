@@ -13,6 +13,7 @@ except Exception:  # noqa: BLE001
 class OutputConfig:
     format: str = "webp"
     quality: int = 85
+    webp_method: int = 4
     duration_ms: int = 120
     loop: int = 0
 
@@ -75,6 +76,14 @@ def _sanitize_quality(value: int) -> int:
     return value
 
 
+def _sanitize_webp_method(value: int) -> int:
+    if value < 0:
+        return 0
+    if value > 6:
+        return 6
+    return value
+
+
 def _sanitize_duration_ms(value: int) -> int:
     return value if value > 0 else 120
 
@@ -122,6 +131,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
 
     raw_format = output_data.get("format", "webp") if isinstance(output_data, dict) else "webp"
     raw_quality = output_data.get("quality", 85) if isinstance(output_data, dict) else 85
+    raw_webp_method = output_data.get("webp_method", 4) if isinstance(output_data, dict) else 4
     raw_duration_ms = output_data.get("duration_ms", 120) if isinstance(output_data, dict) else 120
     raw_loop = output_data.get("loop", 0) if isinstance(output_data, dict) else 0
 
@@ -133,6 +143,11 @@ def load_config(config_path: str | None = None) -> AppConfig:
         quality = int(raw_quality)
     except (TypeError, ValueError):
         quality = 85
+
+    try:
+        webp_method = int(raw_webp_method)
+    except (TypeError, ValueError):
+        webp_method = 4
 
     try:
         duration_ms = int(raw_duration_ms)
@@ -153,6 +168,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
         output=OutputConfig(
             format=_sanitize_format(str(raw_format)),
             quality=_sanitize_quality(quality),
+            webp_method=_sanitize_webp_method(webp_method),
             duration_ms=_sanitize_duration_ms(duration_ms),
             loop=_sanitize_loop(loop),
         ),
