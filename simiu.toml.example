@@ -1,0 +1,3 @@
+[group]
+# Group folder naming prefix. Final name format: <name_prefix>__set_001
+name_prefix = "simiu_set"

@@ -34,8 +34,9 @@ simiu group "D:/path/to/artist_pack" --apply --mode move
 6. 命令框架：统一使用 Typer，入口命令和参数更清晰。
 6. 路径输入优化：支持命令参数、剪贴板路径、交互式输入（参考 psdc 体验）。
 7. 显示美化：使用 `rich` 输出分组预览表格和执行摘要面板。
-8. 安全执行：默认 dry-run，只有 `--apply` 才会落盘。
+8. 安全执行：默认 dry-run，预览后会询问是否立即 apply（默认 yes）。
 9. 可回滚：`--apply` 时写入 undo 日志，支持恢复。
+10. 配置支持：可通过 `simiu.toml` 自定义分组目录前缀。
 
 ## 命令引导
 
@@ -45,6 +46,12 @@ simiu group "D:/path/to/artist_pack" --apply --mode move
 ## 常用命令
 
 - 预览分组：
+
+```bash
+simiu group "D:/pack"
+```
+
+- 预览后立即执行（默认 yes）：
 
 ```bash
 simiu group "D:/pack"
@@ -61,6 +68,23 @@ simiu group "D:/pack" --recursive --scan-order smallest-first
 ```bash
 simiu group "D:/pack" --no-recursive
 ```
+
+- 指定配置文件：
+
+```bash
+simiu group "D:/pack" --config "D:/path/to/simiu.toml"
+```
+
+## 配置文件
+
+可在以下位置放置配置文件（按优先顺序读取第一个存在的）：
+
+1. `--config` 指定路径
+2. 当前工作目录 `simiu.toml`
+3. 目标目录 `simiu.toml`
+4. 目标目录 `.simiu.toml`
+
+示例见 `simiu.toml.example`。
 
 - 从剪贴板读取路径：
 

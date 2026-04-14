@@ -74,8 +74,8 @@ def cluster_by_similarity(
     return result
 
 
-def choose_group_name(index: int) -> str:
-    return f"simiu_set{AUTO_GROUP_MARKER}{index:03d}"
+def choose_group_name(index: int, prefix: str) -> str:
+    return f"{prefix}{AUTO_GROUP_MARKER}{index:03d}"
 
 
 def dedupe_group_dir_name(parent: Path, name: str, used_names: set[str]) -> str:
@@ -93,6 +93,7 @@ def plan_groups_for_folder(
     image_paths: Sequence[Path],
     threshold: float,
     min_group_size: int,
+    name_prefix: str,
 ) -> list[PlannedGroup]:
     features: dict[Path, ImageFeature] = {}
     for p in image_paths:
@@ -107,7 +108,7 @@ def plan_groups_for_folder(
     for files in clusters:
         if len(files) < min_group_size:
             continue
-        raw_name = choose_group_name(group_index)
+        raw_name = choose_group_name(group_index, name_prefix)
         name = dedupe_group_dir_name(folder, raw_name, used_names)
         group_index += 1
         groups.append(PlannedGroup(parent_dir=folder, name=name, files=list(files)))

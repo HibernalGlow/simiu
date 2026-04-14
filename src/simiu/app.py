@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
+import sys
 
 import typer
 from rich.console import Console
 from rich.markup import escape
 from rich.prompt import Confirm
 
+from .config import load_config
 from .grouping import plan_groups_for_folder
 from .operations import apply_groups, undo_from_log
 from .path_input import resolve_group_root
@@ -40,6 +42,7 @@ def entry(ctx: typer.Context) -> None:
 def group_command(
     folder: Optional[str] = typer.Argument(None, help="Root folder to process"),
     clipboard: bool = typer.Option(False, "--clipboard", help="Read folder path from clipboard when folder is omitted"),
+    config: Optional[str] = typer.Option(None, "--config", help="Path to simiu config toml"),
     recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Traverse sub-folders, default enabled"),
     scan_order: str = typer.Option("smallest-first", "--scan-order", help="Folder scan order", case_sensitive=False),
     threshold: float = typer.Option(0.17, "--threshold", help="Similarity threshold, lower is stricter"),
@@ -61,6 +64,10 @@ def group_command(
     root = resolve_group_root(console, folder, clipboard)
     if root is None:
         raise typer.Exit(2)
+
+    app_config = load_config(root=root, config_path=config)
+    if app_config.source_path is not None:
+        console.print(f"[blue]已加载配置: {escape(str(app_config.source_path))}[/blue]")
 
     show_root_panel(console, root, recursive, scan_order)
 
@@ -84,6 +91,7 @@ def group_command(
                     image_paths=image_paths,
                     threshold=threshold,
                     min_group_size=min_group_size,
+                    name_prefix=app_config.group.name_prefix,
                 )
             )
 
@@ -92,12 +100,14 @@ def group_command(
         raise typer.Exit(0)
 
     total_files = show_groups_table(console, groups, root, preview_limit)
-    moved_files, created_groups, undo_log = apply_groups(root=root, groups=groups, mode=mode, apply=apply)
-
     if apply:
+        moved_files, created_groups, undo_log = apply_groups(root=root, groups=groups, mode=mode, apply=True)
         show_done_panel(console, created_groups, moved_files, mode, undo_log)
     else:
         show_dry_run_panel(console, len(folder_batches), len(groups), total_files)
+        if sys.stdin.isatty() and Confirm.ask("是否立即执行 apply", default=True):
+            moved_files, created_groups, undo_log = apply_groups(root=root, groups=groups, mode=mode, apply=True)
+            show_done_panel(console, created_groups, moved_files, mode, undo_log)
 
 
 @app.command("undo")
