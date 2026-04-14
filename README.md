@@ -15,26 +15,32 @@ pip install -e .
 2. 先做预览（不会移动文件）：
 
 ```bash
-simiu group "D:/path/to/artist_pack" --recursive
+simiu group "D:/path/to/artist_pack"
 ```
 
 3. 确认结果后执行实际操作：
 
 ```bash
-simiu group "D:/path/to/artist_pack" --recursive --apply --mode move
+simiu group "D:/path/to/artist_pack" --apply --mode move
 ```
 
 ## 设计思路
 
-1. 相似库分组：使用 `imagehash` 的图像感知哈希做主特征，结合宽高比、颜色均值、文件大小做保守聚类。
+1. 相似库分组：使用 OpenCV 的 pHash 特征做主特征，结合宽高比、颜色均值、文件大小做保守聚类。
 2. 不依赖文件名：分组决策完全基于图像特征，不使用文件名规则。
 3. 同层隔离：每个文件夹单独计算分组，不跨父子目录混分。
-4. 支持遍历：`--recursive` 会递归发现目录，但每层只处理本层图片。
+4. 支持遍历：默认递归扫描子目录，且每层只处理本层图片。
 5. 扫描顺序：递归时默认 `--scan-order smallest-first`，从最小文件夹开始。
+6. 命令框架：统一使用 Typer，入口命令和参数更清晰。
 6. 路径输入优化：支持命令参数、剪贴板路径、交互式输入（参考 psdc 体验）。
 7. 显示美化：使用 `rich` 输出分组预览表格和执行摘要面板。
 8. 安全执行：默认 dry-run，只有 `--apply` 才会落盘。
 9. 可回滚：`--apply` 时写入 undo 日志，支持恢复。
+
+## 命令引导
+
+- 直接执行 `simiu`（不带子命令）会显示引导面板。
+- 主要子命令：`group`、`undo`。
 
 ## 常用命令
 
@@ -48,6 +54,12 @@ simiu group "D:/pack"
 
 ```bash
 simiu group "D:/pack" --recursive --scan-order smallest-first
+```
+
+- 只处理当前目录（关闭递归）：
+
+```bash
+simiu group "D:/pack" --no-recursive
 ```
 
 - 从剪贴板读取路径：
