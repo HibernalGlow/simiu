@@ -37,6 +37,7 @@ simiu group "D:/path/to/artist_pack" --apply --mode move
 8. 安全执行：默认 dry-run，预览后会询问是否立即 apply（默认 yes）。
 9. 可回滚：`--apply` 时写入 undo 日志，支持恢复。
 10. 配置支持：可通过 `simiu.toml` 自定义分组目录前缀。
+11. 性能优化：默认启用特征提取并行与比对剪枝，可在配置中调节并行度。
 
 ## 命令引导
 
@@ -85,6 +86,16 @@ simiu group "D:/pack" --config "D:/path/to/simiu.toml"
 4. 目标目录 `.simiu.toml`
 
 示例见 `simiu.toml.example`。
+
+可选性能配置：
+
+```toml
+[performance]
+max_workers = 0
+```
+
+- `0` 表示自动选择并行线程。
+- 大目录可手动设为 `8`、`12` 等以进一步提速。
 
 - 从剪贴板读取路径：
 

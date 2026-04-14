@@ -11,8 +11,14 @@ class GroupConfig:
 
 
 @dataclass
+class PerformanceConfig:
+    max_workers: int = 0
+
+
+@dataclass
 class AppConfig:
     group: GroupConfig
+    performance: PerformanceConfig
     source_path: Path | None
 
 
@@ -66,4 +72,17 @@ def load_config(root: Path, config_path: str | None = None) -> AppConfig:
     raw_prefix = group_data.get("name_prefix", "simiu_set") if isinstance(group_data, dict) else "simiu_set"
     prefix = _sanitize_prefix(str(raw_prefix))
 
-    return AppConfig(group=GroupConfig(name_prefix=prefix), source_path=chosen)
+    perf_data = data.get("performance", {}) if isinstance(data, dict) else {}
+    raw_workers = perf_data.get("max_workers", 0) if isinstance(perf_data, dict) else 0
+    try:
+        max_workers = int(raw_workers)
+    except (TypeError, ValueError):
+        max_workers = 0
+    if max_workers < 0:
+        max_workers = 0
+
+    return AppConfig(
+        group=GroupConfig(name_prefix=prefix),
+        performance=PerformanceConfig(max_workers=max_workers),
+        source_path=chosen,
+    )

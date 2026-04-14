@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Sequence
 
@@ -41,20 +43,23 @@ def cluster_by_similarity(
     if not valid_paths:
         return []
 
+    # Sort by ratio so we can break early once ratio delta exceeds threshold.
+    ordered = sorted(valid_paths, key=lambda p: features[p].ratio)
+
     uf = UnionFind(valid_paths)
-    n = len(valid_paths)
+    n = len(ordered)
     for i in range(n):
-        a_path = valid_paths[i]
+        a_path = ordered[i]
         a = features[a_path]
         for j in range(i + 1, n):
-            b_path = valid_paths[j]
+            b_path = ordered[j]
             b = features[b_path]
             if uf.find(a_path) == uf.find(b_path):
                 continue
 
             ratio_delta = abs(a.ratio - b.ratio)
             if ratio_delta > 0.20:
-                continue
+                break
 
             score = pair_score(a, b)
             if score <= threshold:
@@ -94,14 +99,27 @@ def plan_groups_for_folder(
     threshold: float,
     min_group_size: int,
     name_prefix: str,
+    max_workers: int = 0,
 ) -> list[PlannedGroup]:
     features: dict[Path, ImageFeature] = {}
-    for p in image_paths:
-        f = extract_feature(p)
-        if f is not None:
-            features[p] = f
+    if image_paths:
+        if max_workers <= 0:
+            cpu = os.cpu_count() or 4
+            max_workers = min(16, max(4, cpu), len(image_paths))
+        else:
+            max_workers = max(1, min(max_workers, len(image_paths)))
+
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            for p, f in zip(image_paths, pool.map(extract_feature, image_paths)):
+                if f is not None:
+                    features[p] = f
 
     clusters = cluster_by_similarity(image_paths, features, threshold)
+
+    # If all files in this folder collapse into one group, skip to avoid nested "all-in-one" folder.
+    if len(clusters) == 1 and len(clusters[0]) == len(image_paths):
+        return []
+
     groups: list[PlannedGroup] = []
     group_index = 1
     used_names: set[str] = set()

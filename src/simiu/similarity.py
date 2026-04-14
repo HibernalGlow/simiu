@@ -1,23 +1,48 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 
 import cv2
+import imagehash
 import numpy as np
+from PIL import Image
 
 from .models import ImageFeature
+
+_TLS = threading.local()
+
+
+def _opencv_phash_bits(gray_img: np.ndarray) -> np.ndarray | None:
+    if not hasattr(cv2, "img_hash"):
+        return None
+    try:
+        hasher = getattr(_TLS, "opencv_phash", None)
+        if hasher is None:
+            hasher = cv2.img_hash.PHash_create()
+            _TLS.opencv_phash = hasher
+
+        digest = hasher.compute(gray_img)
+        if digest is None:
+            return None
+        bits = np.unpackbits(np.asarray(digest, dtype=np.uint8).flatten())
+        return bits.astype(np.uint8)
+    except Exception:
+        return None
 
 
 def phash_bits_from_bgr(img_bgr: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-    resized = cv2.resize(gray, (32, 32), interpolation=cv2.INTER_AREA)
-    dct = cv2.dct(np.float32(resized))
-    dct_low = dct[:8, :8]
 
-    # Ignore DC component when computing the threshold.
-    med = np.median(dct_low[1:, 1:])
-    bits = (dct_low > med).astype(np.uint8).flatten()
-    return bits
+    # Prefer OpenCV native pHash for speed; fallback to imagehash for compatibility.
+    fast_bits = _opencv_phash_bits(gray)
+    if fast_bits is not None and fast_bits.size > 0:
+        return fast_bits
+
+    rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+    pil_image = Image.fromarray(rgb)
+    ph = imagehash.phash(pil_image, hash_size=16)
+    return np.asarray(ph.hash, dtype=np.uint8).flatten()
 
 
 def extract_feature(path: Path) -> ImageFeature | None:
@@ -49,7 +74,7 @@ def extract_feature(path: Path) -> ImageFeature | None:
             phash_bits=bits,
             file_size=fsize,
         )
-    except (OSError, ValueError, cv2.error):
+    except Exception:
         return None
 
 

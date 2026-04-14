@@ -83,21 +83,27 @@ def group_command(
         raise typer.Exit(0)
 
     groups = []
+    skipped_all_in_one = 0
     with console.status("[bold cyan]正在计算相似分组..."):
         for folder_path, image_paths in folder_batches:
-            groups.extend(
-                plan_groups_for_folder(
-                    folder=folder_path,
-                    image_paths=image_paths,
-                    threshold=threshold,
-                    min_group_size=min_group_size,
-                    name_prefix=app_config.group.name_prefix,
-                )
+            planned = plan_groups_for_folder(
+                folder=folder_path,
+                image_paths=image_paths,
+                threshold=threshold,
+                min_group_size=min_group_size,
+                name_prefix=app_config.group.name_prefix,
+                max_workers=app_config.performance.max_workers,
             )
+            if not planned and len(image_paths) >= min_group_size:
+                skipped_all_in_one += 1
+            groups.extend(planned)
 
     if not groups:
         console.print("[yellow]当前阈值下没有可分组结果[/yellow]")
         raise typer.Exit(0)
+
+    if skipped_all_in_one > 0:
+        console.print(f"[blue]已跳过 {skipped_all_in_one} 个全量单组目录（避免嵌套）[/blue]")
 
     total_files = show_groups_table(console, groups, root, preview_limit)
     if apply:
