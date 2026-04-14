@@ -334,8 +334,8 @@ def _run_make(
     recursive: bool,
     out_dir: str | None,
     fmt: str | None,
-    duration_ms: int,
-    loop: int,
+    duration_ms: int | None,
+    loop: int | None,
     quality: int | None,
     name_prefix: str | None,
     name_template: str | None,
@@ -348,6 +348,8 @@ def _run_make(
         console.print(f"[blue]已加载配置: {escape(str(app_config.source_path))}[/blue]")
 
     effective_fmt = (fmt or app_config.output.format).lower()
+    effective_duration_ms = duration_ms if duration_ms is not None else app_config.output.duration_ms
+    effective_loop = loop if loop is not None else app_config.output.loop
     effective_quality = quality if quality is not None else app_config.output.quality
     effective_prefix = name_prefix if name_prefix is not None else app_config.naming.prefix
     effective_template = name_template if name_template is not None else app_config.naming.template
@@ -359,8 +361,11 @@ def _run_make(
     if fmt not in {"gif", "webp", "apng", "auto"}:
         console.print("[red]format 仅支持: gif, webp, apng, auto[/red]")
         raise typer.Exit(2)
-    if duration_ms <= 0:
+    if effective_duration_ms <= 0:
         console.print("[red]duration 必须大于 0[/red]")
+        raise typer.Exit(2)
+    if effective_loop < 0:
+        console.print("[red]loop 必须大于等于 0[/red]")
         raise typer.Exit(2)
     if effective_quality < 1 or effective_quality > 100:
         console.print("[red]quality 必须在 1-100[/red]")
@@ -413,8 +418,8 @@ def _run_make(
                     archive_path=archive_path,
                     output_path=output_path,
                     anim_format=fmt,
-                    duration_ms=duration_ms,
-                    loop=loop,
+                    duration_ms=effective_duration_ms,
+                    loop=effective_loop,
                     quality=effective_quality,
                     overwrite=overwrite,
                 )
@@ -436,8 +441,8 @@ def _run_make(
                     archive_path,
                     output_path,
                     fmt,
-                    duration_ms,
-                    loop,
+                    effective_duration_ms,
+                    effective_loop,
                     effective_quality,
                     overwrite,
                 )
@@ -492,8 +497,8 @@ def _interactive_entry() -> None:
         choices=["gif", "webp", "apng", "auto"],
         default=app_config.output.format,
     )
-    duration_ms = int(Prompt.ask("每帧时长毫秒", default="120"))
-    loop = int(Prompt.ask("循环次数（0 为无限）", default="0"))
+    duration_ms = int(Prompt.ask("每帧时长毫秒", default=str(app_config.output.duration_ms)))
+    loop = int(Prompt.ask("循环次数（0 为无限）", default=str(app_config.output.loop)))
     quality = int(Prompt.ask("webp 质量（1-100）", default=str(app_config.output.quality)))
     workers = int(Prompt.ask("并行线程数（0 自动）", default=str(app_config.performance.max_workers)))
     name_prefix = Prompt.ask("输出名前缀", default=app_config.naming.prefix)
@@ -530,8 +535,8 @@ def make_command(
     out_dir: str | None = typer.Option(None, "--out-dir", help="输出目录，不传则输出到各压缩包同目录"),
     config: str | None = typer.Option(None, "--config", help="gifu 配置文件路径"),
     fmt: str | None = typer.Option(None, "--format", help="输出格式: gif|webp|apng|auto", case_sensitive=False),
-    duration_ms: int = typer.Option(120, "--duration", help="每帧时长（毫秒）"),
-    loop: int = typer.Option(0, "--loop", help="循环次数，0 为无限"),
+    duration_ms: int | None = typer.Option(None, "--duration", help="每帧时长（毫秒），默认读取配置"),
+    loop: int | None = typer.Option(None, "--loop", help="循环次数，0 为无限，默认读取配置"),
     quality: int | None = typer.Option(None, "--quality", help="webp 质量（1-100）"),
     max_workers: int | None = typer.Option(None, "--max-workers", help="并行线程数，默认读取配置，0 自动"),
     name_prefix: str | None = typer.Option(None, "--name-prefix", help="输出名前缀，默认来自配置"),

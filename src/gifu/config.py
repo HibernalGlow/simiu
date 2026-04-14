@@ -13,6 +13,8 @@ except Exception:  # noqa: BLE001
 class OutputConfig:
     format: str = "webp"
     quality: int = 85
+    duration_ms: int = 120
+    loop: int = 0
 
 
 @dataclass
@@ -73,6 +75,14 @@ def _sanitize_quality(value: int) -> int:
     return value
 
 
+def _sanitize_duration_ms(value: int) -> int:
+    return value if value > 0 else 120
+
+
+def _sanitize_loop(value: int) -> int:
+    return value if value >= 0 else 0
+
+
 def _sanitize_prefix(value: str) -> str:
     prefix = value.strip()
     return prefix if prefix else "[#dyna]"
@@ -112,6 +122,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
 
     raw_format = output_data.get("format", "webp") if isinstance(output_data, dict) else "webp"
     raw_quality = output_data.get("quality", 85) if isinstance(output_data, dict) else 85
+    raw_duration_ms = output_data.get("duration_ms", 120) if isinstance(output_data, dict) else 120
+    raw_loop = output_data.get("loop", 0) if isinstance(output_data, dict) else 0
 
     raw_prefix = naming_data.get("prefix", "[#dyna]") if isinstance(naming_data, dict) else "[#dyna]"
     raw_template = naming_data.get("template", "{prefix}{stem}") if isinstance(naming_data, dict) else "{prefix}{stem}"
@@ -123,6 +135,16 @@ def load_config(config_path: str | None = None) -> AppConfig:
         quality = 85
 
     try:
+        duration_ms = int(raw_duration_ms)
+    except (TypeError, ValueError):
+        duration_ms = 120
+
+    try:
+        loop = int(raw_loop)
+    except (TypeError, ValueError):
+        loop = 0
+
+    try:
         max_workers = int(raw_workers)
     except (TypeError, ValueError):
         max_workers = 0
@@ -131,6 +153,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
         output=OutputConfig(
             format=_sanitize_format(str(raw_format)),
             quality=_sanitize_quality(quality),
+            duration_ms=_sanitize_duration_ms(duration_ms),
+            loop=_sanitize_loop(loop),
         ),
         naming=NamingConfig(
             prefix=_sanitize_prefix(str(raw_prefix)),

@@ -170,6 +170,8 @@ gifu make "D:/packs" --config "D:/path/to/gifu.toml"
 [output]
 format = "webp"
 quality = 85
+duration_ms = 120
+loop = 0
 
 [naming]
 prefix = "[#dyna]"
@@ -181,3 +183,4 @@ max_workers = 0
 
 支持模板变量：`{prefix}`、`{stem}`、`{archive}`、`{parent}`。
 `max_workers` 为并行转换线程数，`0` 表示自动。
+`duration_ms` 和 `loop` 可作为默认动画参数（命令行 `--duration` / `--loop` 可覆盖）。
