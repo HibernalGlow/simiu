@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from io import BytesIO
+import os
 from pathlib import Path
 from typing import Iterable
 import tarfile
@@ -307,6 +309,24 @@ def _convert_one_archive(
     )
 
 
+def _resolve_max_workers(max_workers: int | None, config_workers: int, task_count: int) -> int:
+    if task_count <= 1:
+        return 1
+    if max_workers is not None:
+        return 1 if max_workers <= 1 else min(max_workers, task_count)
+    if config_workers > 0:
+        return min(config_workers, task_count)
+    auto = min(32, (os.cpu_count() or 4) + 4)
+    return max(1, min(auto, task_count))
+
+
+def _build_output_path(archive_path: Path, output_root: Path | None, target_ext: str, template: str, prefix: str) -> Path:
+    out_stem = _render_output_stem(archive_path, template, prefix)
+    if output_root is not None:
+        return output_root / f"{out_stem}{target_ext}"
+    return archive_path.with_name(f"{out_stem}{target_ext}")
+
+
 def _run_make(
     archives: list[str],
     list_file: str | None,
@@ -319,6 +339,7 @@ def _run_make(
     quality: int | None,
     name_prefix: str | None,
     name_template: str | None,
+    max_workers: int | None,
     config: str | None,
     overwrite: bool,
 ) -> None:
@@ -379,34 +400,61 @@ def _run_make(
 
     target_ext = ".webp" if fmt == "auto" else f".{fmt}"
     output_root = Path(out_dir).expanduser().resolve() if out_dir else None
+    workers = _resolve_max_workers(max_workers, app_config.performance.max_workers, len(archives_found))
+    console.print(f"[blue]并行线程: {workers}[/blue]")
 
     ok = 0
     failed = 0
-    for archive_path in archives_found:
-        out_stem = _render_output_stem(archive_path, effective_template, effective_prefix)
-        output_path = (
-            output_root / f"{out_stem}{target_ext}"
-            if output_root is not None
-            else archive_path.with_name(f"{out_stem}{target_ext}")
-        )
-        try:
-            result = _convert_one_archive(
-                archive_path=archive_path,
-                output_path=output_path,
-                anim_format=fmt,
-                duration_ms=duration_ms,
-                loop=loop,
-                quality=effective_quality,
-                overwrite=overwrite,
-            )
-            ok += 1
-            console.print(
-                f"[green]完成[/green] {escape(str(result.archive_path))} -> "
-                f"{escape(str(result.output_path))} ({result.frame_count} 帧)"
-            )
-        except Exception as exc:  # noqa: BLE001
-            failed += 1
-            console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
+    if workers == 1:
+        for archive_path in archives_found:
+            output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix)
+            try:
+                result = _convert_one_archive(
+                    archive_path=archive_path,
+                    output_path=output_path,
+                    anim_format=fmt,
+                    duration_ms=duration_ms,
+                    loop=loop,
+                    quality=effective_quality,
+                    overwrite=overwrite,
+                )
+                ok += 1
+                console.print(
+                    f"[green]完成[/green] {escape(str(result.archive_path))} -> "
+                    f"{escape(str(result.output_path))} ({result.frame_count} 帧)"
+                )
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
+    else:
+        future_map = {}
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for archive_path in archives_found:
+                output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix)
+                fut = executor.submit(
+                    _convert_one_archive,
+                    archive_path,
+                    output_path,
+                    fmt,
+                    duration_ms,
+                    loop,
+                    effective_quality,
+                    overwrite,
+                )
+                future_map[fut] = archive_path
+
+            for fut in as_completed(future_map):
+                archive_path = future_map[fut]
+                try:
+                    result = fut.result()
+                    ok += 1
+                    console.print(
+                        f"[green]完成[/green] {escape(str(result.archive_path))} -> "
+                        f"{escape(str(result.output_path))} ({result.frame_count} 帧)"
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    failed += 1
+                    console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
 
     console.print(f"[cyan]处理完成: 成功 {ok}，失败 {failed}，总计 {len(archives_found)}[/cyan]")
 
@@ -447,6 +495,7 @@ def _interactive_entry() -> None:
     duration_ms = int(Prompt.ask("每帧时长毫秒", default="120"))
     loop = int(Prompt.ask("循环次数（0 为无限）", default="0"))
     quality = int(Prompt.ask("webp 质量（1-100）", default=str(app_config.output.quality)))
+    workers = int(Prompt.ask("并行线程数（0 自动）", default=str(app_config.performance.max_workers)))
     name_prefix = Prompt.ask("输出名前缀", default=app_config.naming.prefix)
     name_template = Prompt.ask("命名模板（可用 {prefix} {stem} {archive} {parent}）", default=app_config.naming.template)
     overwrite = Confirm.ask("输出已存在时是否覆盖", default=False)
@@ -466,6 +515,7 @@ def _interactive_entry() -> None:
         quality=quality,
         name_prefix=name_prefix,
         name_template=name_template,
+        max_workers=workers,
         config=config_path,
         overwrite=overwrite,
     )
@@ -483,6 +533,7 @@ def make_command(
     duration_ms: int = typer.Option(120, "--duration", help="每帧时长（毫秒）"),
     loop: int = typer.Option(0, "--loop", help="循环次数，0 为无限"),
     quality: int | None = typer.Option(None, "--quality", help="webp 质量（1-100）"),
+    max_workers: int | None = typer.Option(None, "--max-workers", help="并行线程数，默认读取配置，0 自动"),
     name_prefix: str | None = typer.Option(None, "--name-prefix", help="输出名前缀，默认来自配置"),
     name_template: str | None = typer.Option(None, "--name-template", help="命名模板，默认来自配置"),
     overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
@@ -500,6 +551,7 @@ def make_command(
         quality=quality,
         name_prefix=name_prefix,
         name_template=name_template,
+        max_workers=max_workers,
         overwrite=overwrite,
     )
 

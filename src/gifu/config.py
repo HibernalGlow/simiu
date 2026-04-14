@@ -22,9 +22,15 @@ class NamingConfig:
 
 
 @dataclass
+class PerformanceConfig:
+    max_workers: int = 0
+
+
+@dataclass
 class AppConfig:
     output: OutputConfig
     naming: NamingConfig
+    performance: PerformanceConfig
     source_path: Path | None
 
 
@@ -81,6 +87,10 @@ def _sanitize_template(value: str) -> str:
     return template
 
 
+def _sanitize_max_workers(value: int) -> int:
+    return value if value >= 0 else 0
+
+
 def load_config(config_path: str | None = None) -> AppConfig:
     chosen: Path | None = None
     data: dict = {}
@@ -98,17 +108,24 @@ def load_config(config_path: str | None = None) -> AppConfig:
 
     output_data = data.get("output", {}) if isinstance(data, dict) else {}
     naming_data = data.get("naming", {}) if isinstance(data, dict) else {}
+    perf_data = data.get("performance", {}) if isinstance(data, dict) else {}
 
     raw_format = output_data.get("format", "webp") if isinstance(output_data, dict) else "webp"
     raw_quality = output_data.get("quality", 85) if isinstance(output_data, dict) else 85
 
     raw_prefix = naming_data.get("prefix", "[#dyna]") if isinstance(naming_data, dict) else "[#dyna]"
     raw_template = naming_data.get("template", "{prefix}{stem}") if isinstance(naming_data, dict) else "{prefix}{stem}"
+    raw_workers = perf_data.get("max_workers", 0) if isinstance(perf_data, dict) else 0
 
     try:
         quality = int(raw_quality)
     except (TypeError, ValueError):
         quality = 85
+
+    try:
+        max_workers = int(raw_workers)
+    except (TypeError, ValueError):
+        max_workers = 0
 
     return AppConfig(
         output=OutputConfig(
@@ -119,5 +136,6 @@ def load_config(config_path: str | None = None) -> AppConfig:
             prefix=_sanitize_prefix(str(raw_prefix)),
             template=_sanitize_template(str(raw_template)),
         ),
+        performance=PerformanceConfig(max_workers=_sanitize_max_workers(max_workers)),
         source_path=chosen,
     )

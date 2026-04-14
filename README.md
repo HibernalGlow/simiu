@@ -174,6 +174,10 @@ quality = 85
 [naming]
 prefix = "[#dyna]"
 template = "{prefix}{stem}"
+
+[performance]
+max_workers = 0
 ```
 
 支持模板变量：`{prefix}`、`{stem}`、`{archive}`、`{parent}`。
+`max_workers` 为并行转换线程数，`0` 表示自动。
