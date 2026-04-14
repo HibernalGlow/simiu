@@ -31,8 +31,10 @@ simiu group "D:/path/to/artist_pack" --recursive --apply --mode move
 3. 同层隔离：每个文件夹单独计算分组，不跨父子目录混分。
 4. 支持遍历：`--recursive` 会递归发现目录，但每层只处理本层图片。
 5. 扫描顺序：递归时默认 `--scan-order smallest-first`，从最小文件夹开始。
-6. 安全执行：默认 dry-run，只有 `--apply` 才会落盘。
-7. 可回滚：`--apply` 时写入 undo 日志，支持恢复。
+6. 路径输入优化：支持命令参数、剪贴板路径、交互式输入（参考 psdc 体验）。
+7. 显示美化：使用 `rich` 输出分组预览表格和执行摘要面板。
+8. 安全执行：默认 dry-run，只有 `--apply` 才会落盘。
+9. 可回滚：`--apply` 时写入 undo 日志，支持恢复。
 
 ## 常用命令
 
@@ -46,6 +48,18 @@ simiu group "D:/pack"
 
 ```bash
 simiu group "D:/pack" --recursive --scan-order smallest-first
+```
+
+- 从剪贴板读取路径：
+
+```bash
+simiu group --clipboard
+```
+
+- 不传路径，进入交互输入：
+
+```bash
+simiu group
 ```
 
 - 实际移动：
