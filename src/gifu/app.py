@@ -69,7 +69,22 @@ def entry(ctx: typer.Context) -> None:
 
 
 def _clean_line_path(line: str) -> str:
-    return line.strip().strip('"').strip("'").strip()
+    cleaned = line.strip()
+    if len(cleaned) >= 2 and cleaned[0] == cleaned[-1] and cleaned[0] in {'"', "'"}:
+        cleaned = cleaned[1:-1].strip()
+    return cleaned
+
+
+def _parse_paths_from_text(text: str) -> list[Path]:
+    result: list[Path] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        cleaned = _clean_line_path(line)
+        if cleaned:
+            result.append(Path(cleaned))
+    return result
 
 
 def _is_archive_file(path: Path) -> bool:
@@ -102,16 +117,14 @@ def _render_output_stem(archive_path: Path, template: str, prefix: str) -> str:
 def _parse_list_file(path: Path) -> list[Path]:
     if not path.exists() or not path.is_file():
         raise ValueError(f"路径清单文件不存在: {path}")
-    result: list[Path] = []
-    with path.open("r", encoding="utf-8") as fp:
-        for raw in fp:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            cleaned = _clean_line_path(line)
-            if cleaned:
-                result.append(Path(cleaned))
-    return result
+
+    for enc in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            text = path.read_text(encoding=enc)
+            return _parse_paths_from_text(text)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(f"无法读取路径清单编码: {path}")
 
 
 def _parse_clipboard_paths() -> list[Path]:
@@ -126,12 +139,7 @@ def _parse_clipboard_paths() -> list[Path]:
     if not text:
         return []
 
-    result: list[Path] = []
-    for line in text.splitlines():
-        cleaned = _clean_line_path(line)
-        if cleaned:
-            result.append(Path(cleaned))
-    return result
+    return _parse_paths_from_text(text)
 
 
 def _collect_archives(paths: Iterable[Path], recursive: bool) -> list[Path]:
