@@ -4,7 +4,7 @@ name_prefix = "simi"
 
 [similarity]
 # Lower is stricter; higher is looser.
-phash_threshold = 0.17
+phash_threshold = 0.21
 
 [performance]
 # 0 means auto. You can set e.g. 8 or 12 for large folders.
