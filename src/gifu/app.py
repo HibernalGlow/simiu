@@ -34,6 +34,7 @@ IMAGE_EXTS = {
     ".tiff",
     ".gif",
     ".avif",
+    ".jxl",
 }
 ARCHIVE_EXTS = {
     ".zip",

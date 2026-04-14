@@ -131,6 +131,7 @@ simiu undo "D:/pack/.simiu-undo-20260414-120000.json"
 ## gifu（压缩包转动图）
 
 按压缩包内部文件顺序读取图片，批量转换为 gif/webp/apng。
+支持常见输入帧格式，包括 jpg/png/webp/gif/tiff/bmp/avif/jxl。
 
 - 无参数直接进入交互引导：
 
