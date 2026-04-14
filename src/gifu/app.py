@@ -346,10 +346,14 @@ def _run_make(
         raise typer.Exit(2)
 
     raw_inputs: list[Path] = [Path(p) for p in archives]
+    if archives:
+        console.print(f"[blue]参数输入路径: {len(archives)} 条[/blue]")
 
     if list_file:
         try:
-            raw_inputs.extend(_parse_list_file(Path(list_file).expanduser().resolve()))
+            list_paths = _parse_list_file(Path(list_file).expanduser().resolve())
+            raw_inputs.extend(list_paths)
+            console.print(f"[blue]清单读取路径: {len(list_paths)} 条[/blue]")
         except ValueError as exc:
             console.print(f"[red]{escape(str(exc))}[/red]")
             raise typer.Exit(2)
@@ -357,16 +361,21 @@ def _run_make(
     if clipboard:
         if pyperclip is None:
             console.print("[yellow]未安装 pyperclip，已忽略 --clipboard[/yellow]")
-        raw_inputs.extend(_parse_clipboard_paths())
+        clipboard_paths = _parse_clipboard_paths()
+        raw_inputs.extend(clipboard_paths)
+        console.print(f"[blue]剪贴板读取路径: {len(clipboard_paths)} 条[/blue]")
 
     if not raw_inputs:
         console.print("[red]请至少提供一个压缩包路径（参数/--list-file/--clipboard）[/red]")
         raise typer.Exit(2)
 
+    console.print(f"[blue]合计输入路径: {len(raw_inputs)} 条，开始扫描压缩包...[/blue]")
     archives_found = _collect_archives(raw_inputs, recursive=recursive)
     if not archives_found:
         console.print("[yellow]未找到可处理压缩包（支持 zip/cbz/tar/tgz/tar.gz/tbz2/txz）[/yellow]")
         raise typer.Exit(0)
+
+    console.print(f"[blue]扫描完成，可处理压缩包: {len(archives_found)} 个[/blue]")
 
     target_ext = ".webp" if fmt == "auto" else f".{fmt}"
     output_root = Path(out_dir).expanduser().resolve() if out_dir else None
