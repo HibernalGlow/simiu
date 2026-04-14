@@ -19,6 +19,11 @@ dependencies = [
 simiu = "simiu.app:main"
 gifu = "gifu.app:main"
 
+[project.optional-dependencies]
+test = [
+  "pytest>=8.2.0"
+]
+
 [build-system]
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"

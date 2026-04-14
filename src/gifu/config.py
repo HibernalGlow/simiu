@@ -13,7 +13,7 @@ except Exception:  # noqa: BLE001
 class OutputConfig:
     format: str = "webp"
     quality: int = 85
-    webp_method: int = 4
+    webp_method: int = 2
     duration_ms: int = 120
     loop: int = 0
 
@@ -131,7 +131,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
 
     raw_format = output_data.get("format", "webp") if isinstance(output_data, dict) else "webp"
     raw_quality = output_data.get("quality", 85) if isinstance(output_data, dict) else 85
-    raw_webp_method = output_data.get("webp_method", 4) if isinstance(output_data, dict) else 4
+    raw_webp_method = output_data.get("webp_method", 2) if isinstance(output_data, dict) else 2
     raw_duration_ms = output_data.get("duration_ms", 120) if isinstance(output_data, dict) else 120
     raw_loop = output_data.get("loop", 0) if isinstance(output_data, dict) else 0
 
@@ -147,7 +147,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
     try:
         webp_method = int(raw_webp_method)
     except (TypeError, ValueError):
-        webp_method = 4
+        webp_method = 2
 
     try:
         duration_ms = int(raw_duration_ms)

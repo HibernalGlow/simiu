@@ -186,3 +186,9 @@ max_workers = 0
 `max_workers` 为并行转换线程数，`0` 表示自动。
 `duration_ms` 和 `loop` 可作为默认动画参数（命令行 `--duration` / `--loop` 可覆盖）。
 `webp_method` 取值 0-6，越低编码越快（文件可能更大）。
+
+性能回归测试（目标 >= 5 帧/s）：
+
+```bash
+pytest tests/test_gifu_perf.py -q
+```

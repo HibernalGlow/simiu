@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from io import BytesIO
 import os
 from pathlib import Path
+import time
 from typing import Iterable
 import tarfile
 import zipfile
@@ -314,6 +315,9 @@ def _resolve_max_workers(max_workers: int | None, config_workers: int, task_coun
     if task_count <= 1:
         return 1
     if max_workers is not None:
+        if max_workers == 0:
+            auto = min(32, (os.cpu_count() or 4) + 4)
+            return max(1, min(auto, task_count))
         return 1 if max_workers <= 1 else min(max_workers, task_count)
     if config_workers > 0:
         return min(config_workers, task_count)
@@ -416,6 +420,8 @@ def _run_make(
 
     ok = 0
     failed = 0
+    total_frames = 0
+    started = time.perf_counter()
     if workers == 1:
         for archive_path in archives_found:
             output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix)
@@ -431,6 +437,7 @@ def _run_make(
                     overwrite=overwrite,
                 )
                 ok += 1
+                total_frames += result.frame_count
                 console.print(
                     f"[green]完成[/green] {escape(str(result.archive_path))} -> "
                     f"{escape(str(result.output_path))} ({result.frame_count} 帧)"
@@ -461,6 +468,7 @@ def _run_make(
                 try:
                     result = fut.result()
                     ok += 1
+                    total_frames += result.frame_count
                     console.print(
                         f"[green]完成[/green] {escape(str(result.archive_path))} -> "
                         f"{escape(str(result.output_path))} ({result.frame_count} 帧)"
@@ -469,6 +477,9 @@ def _run_make(
                     failed += 1
                     console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
 
+    elapsed = max(0.0001, time.perf_counter() - started)
+    fps = total_frames / elapsed
+    console.print(f"[cyan]性能: {total_frames} 帧 / {elapsed:.2f}s = {fps:.2f} 帧/s[/cyan]")
     console.print(f"[cyan]处理完成: 成功 {ok}，失败 {failed}，总计 {len(archives_found)}[/cyan]")
 
 
