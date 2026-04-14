@@ -17,6 +17,7 @@ dependencies = [
 
 [project.scripts]
 simiu = "simiu.app:main"
+gifu = "gifu.app:main"
 
 [build-system]
 requires = ["setuptools>=68.0"]

@@ -127,3 +127,25 @@ simiu group "D:/pack" --apply --mode copy
 ```bash
 simiu undo "D:/pack/.simiu-undo-20260414-120000.json"
 ```
+
+## gifu（压缩包转动图）
+
+按压缩包内部文件顺序读取图片，批量转换为 gif/webp/apng。
+
+- 直接传多个压缩包：
+
+```bash
+gifu make "D:/a.zip" "D:/b.cbz"
+```
+
+- 输入目录并递归查找压缩包：
+
+```bash
+gifu make "D:/packs" --recursive --format webp
+```
+
+- 从路径清单批量输入（每行一个，支持注释行 #）：
+
+```bash
+gifu make --list-file "D:/archive_list.txt" --format apng
+```
