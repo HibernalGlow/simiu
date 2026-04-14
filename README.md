@@ -116,6 +116,8 @@ phash_threshold = 0.17
 simiu group --clipboard
 ```
 
+- 若剪贴板是多行目录路径，将按行顺序依次处理全部目录。
+
 - 不传路径，进入交互输入：
 
 ```bash

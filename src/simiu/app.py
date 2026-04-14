@@ -12,7 +12,7 @@ from rich.prompt import Confirm
 from .config import load_config
 from .grouping import plan_groups_for_folder
 from .operations import apply_groups, undo_from_log
-from .path_input import resolve_group_root
+from .path_input import resolve_group_roots
 from .scanner import collect_folder_batches, has_images_in_children
 from .ui import (
     show_done_panel,
@@ -62,90 +62,97 @@ def group_command(
         console.print("[red]mode 仅支持: move, copy, link[/red]")
         raise typer.Exit(2)
 
-    root = resolve_group_root(console, folder, clipboard)
-    if root is None:
+    roots = resolve_group_roots(console, folder, clipboard)
+    if not roots:
         raise typer.Exit(2)
 
-    app_config = load_config(root=root, config_path=config)
-    effective_threshold = app_config.similarity.phash_threshold if threshold is None else threshold
-    if effective_threshold <= 0:
-        console.print("[red]threshold 必须大于 0[/red]")
-        raise typer.Exit(2)
-    if effective_threshold > 1:
-        effective_threshold = 1.0
+    for idx, root in enumerate(roots, start=1):
+        if len(roots) > 1:
+            console.print(f"[cyan]处理目录 {idx}/{len(roots)}: {escape(str(root))}[/cyan]")
 
-    if app_config.source_path is not None:
-        console.print(f"[blue]已加载配置: {escape(str(app_config.source_path))}[/blue]")
-    console.print(
-        f"[blue]配置生效: name_prefix={escape(app_config.group.name_prefix)}, "
-        f"max_workers={app_config.performance.max_workers}, "
-        f"phash_threshold={effective_threshold:.3f}[/blue]"
-    )
+        app_config = load_config(root=root, config_path=config)
+        effective_threshold = app_config.similarity.phash_threshold if threshold is None else threshold
+        if effective_threshold <= 0:
+            console.print("[red]threshold 必须大于 0[/red]")
+            raise typer.Exit(2)
+        if effective_threshold > 1:
+            effective_threshold = 1.0
 
-    show_root_panel(console, root, recursive, scan_order)
-
-    folder_batches = collect_folder_batches(
-        root,
-        recursive=recursive,
-        scan_order=scan_order,
-        name_prefix=app_config.group.name_prefix,
-    )
-    if not folder_batches and not recursive and has_images_in_children(root, name_prefix=app_config.group.name_prefix):
-        if Confirm.ask("当前目录无图片，但子目录有图片，是否启用递归后重试", default=True):
-            recursive = True
-            show_root_panel(console, root, recursive, scan_order)
-            folder_batches = collect_folder_batches(
-                root,
-                recursive=True,
-                scan_order=scan_order,
-                name_prefix=app_config.group.name_prefix,
-            )
-
-    if not folder_batches:
-        console.print("[yellow]未找到图片文件[/yellow]")
-        raise typer.Exit(0)
-
-    groups = []
-    skipped_all_in_one = 0
-    with console.status("[bold cyan]正在计算相似分组..."):
-        for folder_path, image_paths in folder_batches:
-            planned = plan_groups_for_folder(
-                folder=folder_path,
-                image_paths=image_paths,
-                threshold=effective_threshold,
-                min_group_size=min_group_size,
-                name_prefix=app_config.group.name_prefix,
-                max_workers=app_config.performance.max_workers,
-            )
-            if not planned and len(image_paths) >= min_group_size:
-                skipped_all_in_one += 1
-            groups.extend(planned)
-
-    if not groups:
-        console.print("[yellow]当前阈值下没有可分组结果[/yellow]")
-        raise typer.Exit(0)
-
-    if skipped_all_in_one > 0:
-        console.print(f"[blue]已跳过 {skipped_all_in_one} 个全量单组目录（避免嵌套）[/blue]")
-
-    total_files = show_groups_table(console, groups, root, preview_limit)
-    if apply:
-        moved_files, created_groups, undo_log = apply_groups(root=root, groups=groups, mode=mode, apply=True)
-        show_done_panel(console, created_groups, moved_files, mode, undo_log)
-    else:
-        show_dry_run_panel(console, len(folder_batches), len(groups), total_files)
-        show_intelligent_suggestions(
-            console,
-            threshold=effective_threshold,
-            folder_count=len(folder_batches),
-            group_count=len(groups),
-            total_files=total_files,
-            skipped_all_in_one=skipped_all_in_one,
-            max_workers=app_config.performance.max_workers,
+        if app_config.source_path is not None:
+            console.print(f"[blue]已加载配置: {escape(str(app_config.source_path))}[/blue]")
+        console.print(
+            f"[blue]配置生效: name_prefix={escape(app_config.group.name_prefix)}, "
+            f"max_workers={app_config.performance.max_workers}, "
+            f"phash_threshold={effective_threshold:.3f}[/blue]"
         )
-        if sys.stdin.isatty() and Confirm.ask("是否立即执行 apply", default=True):
+
+        local_recursive = recursive
+        show_root_panel(console, root, local_recursive, scan_order)
+
+        folder_batches = collect_folder_batches(
+            root,
+            recursive=local_recursive,
+            scan_order=scan_order,
+            name_prefix=app_config.group.name_prefix,
+        )
+        if not folder_batches and not local_recursive and has_images_in_children(
+            root, name_prefix=app_config.group.name_prefix
+        ):
+            if Confirm.ask("当前目录无图片，但子目录有图片，是否启用递归后重试", default=True):
+                local_recursive = True
+                show_root_panel(console, root, local_recursive, scan_order)
+                folder_batches = collect_folder_batches(
+                    root,
+                    recursive=True,
+                    scan_order=scan_order,
+                    name_prefix=app_config.group.name_prefix,
+                )
+
+        if not folder_batches:
+            console.print("[yellow]未找到图片文件[/yellow]")
+            continue
+
+        groups = []
+        skipped_all_in_one = 0
+        with console.status("[bold cyan]正在计算相似分组..."):
+            for folder_path, image_paths in folder_batches:
+                planned = plan_groups_for_folder(
+                    folder=folder_path,
+                    image_paths=image_paths,
+                    threshold=effective_threshold,
+                    min_group_size=min_group_size,
+                    name_prefix=app_config.group.name_prefix,
+                    max_workers=app_config.performance.max_workers,
+                )
+                if not planned and len(image_paths) >= min_group_size:
+                    skipped_all_in_one += 1
+                groups.extend(planned)
+
+        if not groups:
+            console.print("[yellow]当前阈值下没有可分组结果[/yellow]")
+            continue
+
+        if skipped_all_in_one > 0:
+            console.print(f"[blue]已跳过 {skipped_all_in_one} 个全量单组目录（避免嵌套）[/blue]")
+
+        total_files = show_groups_table(console, groups, root, preview_limit)
+        if apply:
             moved_files, created_groups, undo_log = apply_groups(root=root, groups=groups, mode=mode, apply=True)
             show_done_panel(console, created_groups, moved_files, mode, undo_log)
+        else:
+            show_dry_run_panel(console, len(folder_batches), len(groups), total_files)
+            show_intelligent_suggestions(
+                console,
+                threshold=effective_threshold,
+                folder_count=len(folder_batches),
+                group_count=len(groups),
+                total_files=total_files,
+                skipped_all_in_one=skipped_all_in_one,
+                max_workers=app_config.performance.max_workers,
+            )
+            if sys.stdin.isatty() and Confirm.ask("是否立即执行 apply", default=True):
+                moved_files, created_groups, undo_log = apply_groups(root=root, groups=groups, mode=mode, apply=True)
+                show_done_panel(console, created_groups, moved_files, mode, undo_log)
 
 
 @app.command("undo")
