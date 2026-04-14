@@ -132,6 +132,12 @@ simiu undo "D:/pack/.simiu-undo-20260414-120000.json"
 
 按压缩包内部文件顺序读取图片，批量转换为 gif/webp/apng。
 
+- 无参数直接进入交互引导：
+
+```bash
+gifu
+```
+
 - 直接传多个压缩包：
 
 ```bash
@@ -149,3 +155,25 @@ gifu make "D:/packs" --recursive --format webp
 ```bash
 gifu make --list-file "D:/archive_list.txt" --format apng
 ```
+
+- 使用配置文件设置默认格式/质量/命名：
+
+```bash
+gifu make "D:/packs" --config "D:/path/to/gifu.toml"
+```
+
+默认会给输出文件名加前缀 `[#dyna]`，例如 `a.zip -> [#dyna]a.webp`。
+
+`gifu.toml` 示例：
+
+```toml
+[output]
+format = "webp"
+quality = 85
+
+[naming]
+prefix = "[#dyna]"
+template = "{prefix}{stem}"
+```
+
+支持模板变量：`{prefix}`、`{stem}`、`{archive}`、`{parent}`。

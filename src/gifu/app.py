@@ -11,6 +11,10 @@ import typer
 from PIL import Image
 from rich.console import Console
 from rich.markup import escape
+from rich.panel import Panel
+from rich.prompt import Confirm, Prompt
+
+from .config import load_config
 
 try:
     import pyperclip
@@ -44,7 +48,7 @@ ANIM_FORMATS = {"gif", "webp", "apng"}
 console = Console(highlight=False)
 app = typer.Typer(
     add_completion=False,
-    no_args_is_help=True,
+    no_args_is_help=False,
     rich_markup_mode="rich",
     help="Batch convert archives to animated gif/webp/apng by internal file order.",
 )
@@ -57,6 +61,13 @@ class ConvertResult:
     frame_count: int
 
 
+@app.callback(invoke_without_command=True)
+def entry(ctx: typer.Context) -> None:
+    if ctx.invoked_subcommand is None:
+        _interactive_entry()
+        raise typer.Exit(0)
+
+
 def _clean_line_path(line: str) -> str:
     return line.strip().strip('"').strip("'").strip()
 
@@ -64,6 +75,28 @@ def _clean_line_path(line: str) -> str:
 def _is_archive_file(path: Path) -> bool:
     low = path.name.lower()
     return any(low.endswith(ext) for ext in ARCHIVE_EXTS)
+
+
+def _sanitize_output_stem(stem: str) -> str:
+    banned = '<>:"/\\|?*'
+    cleaned = stem
+    for ch in banned:
+        cleaned = cleaned.replace(ch, "_")
+    cleaned = cleaned.strip().strip(".")
+    return cleaned or "output"
+
+
+def _render_output_stem(archive_path: Path, template: str, prefix: str) -> str:
+    try:
+        rendered = template.format(
+            prefix=prefix,
+            stem=archive_path.stem,
+            archive=archive_path.name,
+            parent=archive_path.parent.name,
+        )
+    except Exception:
+        rendered = f"{prefix}{archive_path.stem}"
+    return _sanitize_output_stem(rendered)
 
 
 def _parse_list_file(path: Path) -> list[Path]:
@@ -266,27 +299,41 @@ def _convert_one_archive(
     )
 
 
-@app.command("make")
-def make_command(
-    archives: list[str] = typer.Argument(None, help="压缩包路径，支持多个；也可传目录"),
-    list_file: str | None = typer.Option(None, "--list-file", help="路径清单文件（每行一个路径）"),
-    clipboard: bool = typer.Option(False, "--clipboard", help="从剪贴板读取路径列表（每行一个）"),
-    recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="输入目录时是否递归查找压缩包"),
-    out_dir: str | None = typer.Option(None, "--out-dir", help="输出目录，不传则输出到各压缩包同目录"),
-    fmt: str = typer.Option("webp", "--format", help="输出格式: gif|webp|apng|auto", case_sensitive=False),
-    duration_ms: int = typer.Option(120, "--duration", help="每帧时长（毫秒）"),
-    loop: int = typer.Option(0, "--loop", help="循环次数，0 为无限"),
-    quality: int = typer.Option(85, "--quality", help="webp 质量（1-100）"),
-    overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
+def _run_make(
+    archives: list[str],
+    list_file: str | None,
+    clipboard: bool,
+    recursive: bool,
+    out_dir: str | None,
+    fmt: str | None,
+    duration_ms: int,
+    loop: int,
+    quality: int | None,
+    name_prefix: str | None,
+    name_template: str | None,
+    config: str | None,
+    overwrite: bool,
 ) -> None:
-    fmt = fmt.lower()
+    app_config = load_config(config)
+    if app_config.source_path is not None:
+        console.print(f"[blue]已加载配置: {escape(str(app_config.source_path))}[/blue]")
+
+    effective_fmt = (fmt or app_config.output.format).lower()
+    effective_quality = quality if quality is not None else app_config.output.quality
+    effective_prefix = name_prefix if name_prefix is not None else app_config.naming.prefix
+    effective_template = name_template if name_template is not None else app_config.naming.template
+
+    if "{stem}" not in effective_template:
+        effective_template = f"{effective_template}{{stem}}"
+
+    fmt = effective_fmt
     if fmt not in {"gif", "webp", "apng", "auto"}:
         console.print("[red]format 仅支持: gif, webp, apng, auto[/red]")
         raise typer.Exit(2)
     if duration_ms <= 0:
         console.print("[red]duration 必须大于 0[/red]")
         raise typer.Exit(2)
-    if quality < 1 or quality > 100:
+    if effective_quality < 1 or effective_quality > 100:
         console.print("[red]quality 必须在 1-100[/red]")
         raise typer.Exit(2)
 
@@ -319,10 +366,11 @@ def make_command(
     ok = 0
     failed = 0
     for archive_path in archives_found:
+        out_stem = _render_output_stem(archive_path, effective_template, effective_prefix)
         output_path = (
-            output_root / f"{archive_path.stem}{target_ext}"
+            output_root / f"{out_stem}{target_ext}"
             if output_root is not None
-            else archive_path.with_suffix(target_ext)
+            else archive_path.with_name(f"{out_stem}{target_ext}")
         )
         try:
             result = _convert_one_archive(
@@ -331,7 +379,7 @@ def make_command(
                 anim_format=fmt,
                 duration_ms=duration_ms,
                 loop=loop,
-                quality=quality,
+                quality=effective_quality,
                 overwrite=overwrite,
             )
             ok += 1
@@ -344,6 +392,99 @@ def make_command(
             console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
 
     console.print(f"[cyan]处理完成: 成功 {ok}，失败 {failed}，总计 {len(archives_found)}[/cyan]")
+
+
+def _interactive_entry() -> None:
+    console.print(
+        Panel.fit(
+            "无参数启动已进入交互模式\n"
+            "支持来源: 手动输入路径列表 / 清单文件 / 剪贴板路径列表",
+            title="gifu 交互引导",
+            border_style="cyan",
+        )
+    )
+
+    use_clipboard_default = bool(_parse_clipboard_paths())
+    use_clipboard = Confirm.ask("是否读取剪贴板中的路径列表", default=use_clipboard_default)
+
+    config_path_raw = Prompt.ask("配置文件路径（留空自动查找 gifu.toml）", default="")
+    config_path = _clean_line_path(config_path_raw) or None
+    app_config = load_config(config_path)
+    if app_config.source_path is not None:
+        console.print(f"[blue]已加载配置: {escape(str(app_config.source_path))}[/blue]")
+
+    list_file: str | None = None
+    if Confirm.ask("是否使用路径清单文件（每行一个路径）", default=False):
+        list_file_raw = Prompt.ask("请输入清单文件路径", default="")
+        list_file = _clean_line_path(list_file_raw) or None
+
+    manual_raw = Prompt.ask("请输入路径列表（多个用 ; 分隔，可留空）", default="")
+    archives = [p for p in (_clean_line_path(x) for x in manual_raw.split(";")) if p]
+
+    recursive = Confirm.ask("输入包含目录时是否递归查找压缩包", default=True)
+    fmt = Prompt.ask(
+        "输出格式",
+        choices=["gif", "webp", "apng", "auto"],
+        default=app_config.output.format,
+    )
+    duration_ms = int(Prompt.ask("每帧时长毫秒", default="120"))
+    loop = int(Prompt.ask("循环次数（0 为无限）", default="0"))
+    quality = int(Prompt.ask("webp 质量（1-100）", default=str(app_config.output.quality)))
+    name_prefix = Prompt.ask("输出名前缀", default=app_config.naming.prefix)
+    name_template = Prompt.ask("命名模板（可用 {prefix} {stem} {archive} {parent}）", default=app_config.naming.template)
+    overwrite = Confirm.ask("输出已存在时是否覆盖", default=False)
+
+    out_dir_raw = Prompt.ask("输出目录（留空则与原压缩包同目录）", default="")
+    out_dir = _clean_line_path(out_dir_raw) or None
+
+    _run_make(
+        archives=archives,
+        list_file=list_file,
+        clipboard=use_clipboard,
+        recursive=recursive,
+        out_dir=out_dir,
+        fmt=fmt,
+        duration_ms=duration_ms,
+        loop=loop,
+        quality=quality,
+        name_prefix=name_prefix,
+        name_template=name_template,
+        config=config_path,
+        overwrite=overwrite,
+    )
+
+
+@app.command("make")
+def make_command(
+    archives: list[str] = typer.Argument(None, help="压缩包路径，支持多个；也可传目录"),
+    list_file: str | None = typer.Option(None, "--list-file", help="路径清单文件（每行一个路径）"),
+    clipboard: bool = typer.Option(False, "--clipboard", help="从剪贴板读取路径列表（每行一个）"),
+    recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="输入目录时是否递归查找压缩包"),
+    out_dir: str | None = typer.Option(None, "--out-dir", help="输出目录，不传则输出到各压缩包同目录"),
+    config: str | None = typer.Option(None, "--config", help="gifu 配置文件路径"),
+    fmt: str | None = typer.Option(None, "--format", help="输出格式: gif|webp|apng|auto", case_sensitive=False),
+    duration_ms: int = typer.Option(120, "--duration", help="每帧时长（毫秒）"),
+    loop: int = typer.Option(0, "--loop", help="循环次数，0 为无限"),
+    quality: int | None = typer.Option(None, "--quality", help="webp 质量（1-100）"),
+    name_prefix: str | None = typer.Option(None, "--name-prefix", help="输出名前缀，默认来自配置"),
+    name_template: str | None = typer.Option(None, "--name-template", help="命名模板，默认来自配置"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
+) -> None:
+    _run_make(
+        archives=archives,
+        list_file=list_file,
+        clipboard=clipboard,
+        recursive=recursive,
+        out_dir=out_dir,
+        config=config,
+        fmt=fmt,
+        duration_ms=duration_ms,
+        loop=loop,
+        quality=quality,
+        name_prefix=name_prefix,
+        name_template=name_template,
+        overwrite=overwrite,
+    )
 
 
 def main() -> None:

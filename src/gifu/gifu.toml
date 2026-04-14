@@ -1,0 +1,10 @@
+[output]
+# gif | webp | apng | auto
+format = "webp"
+quality = 85
+
+[naming]
+# 默认前缀
+prefix = "[#dyna]"
+# 可用变量: {prefix} {stem} {archive} {parent}
+template = "{prefix}{stem}"
