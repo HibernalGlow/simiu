@@ -19,6 +19,7 @@ from .ui import (
     show_dry_run_panel,
     show_entry_guide,
     show_groups_table,
+    show_intelligent_suggestions,
     show_root_panel,
 )
 
@@ -45,7 +46,7 @@ def group_command(
     config: Optional[str] = typer.Option(None, "--config", help="Path to simiu config toml"),
     recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="Traverse sub-folders, default enabled"),
     scan_order: str = typer.Option("smallest-first", "--scan-order", help="Folder scan order", case_sensitive=False),
-    threshold: float = typer.Option(0.17, "--threshold", help="Similarity threshold, lower is stricter"),
+    threshold: Optional[float] = typer.Option(None, "--threshold", help="Similarity threshold, lower is stricter"),
     min_group_size: int = typer.Option(2, "--min-group-size", help="Minimum files needed for a group"),
     preview_limit: int = typer.Option(5, "--preview-limit", help="Show N filenames per group in preview"),
     apply: bool = typer.Option(False, "--apply", help="Apply changes to filesystem"),
@@ -66,11 +67,19 @@ def group_command(
         raise typer.Exit(2)
 
     app_config = load_config(root=root, config_path=config)
+    effective_threshold = app_config.similarity.phash_threshold if threshold is None else threshold
+    if effective_threshold <= 0:
+        console.print("[red]threshold 必须大于 0[/red]")
+        raise typer.Exit(2)
+    if effective_threshold > 1:
+        effective_threshold = 1.0
+
     if app_config.source_path is not None:
         console.print(f"[blue]已加载配置: {escape(str(app_config.source_path))}[/blue]")
     console.print(
         f"[blue]配置生效: name_prefix={escape(app_config.group.name_prefix)}, "
-        f"max_workers={app_config.performance.max_workers}[/blue]"
+        f"max_workers={app_config.performance.max_workers}, "
+        f"phash_threshold={effective_threshold:.3f}[/blue]"
     )
 
     show_root_panel(console, root, recursive, scan_order)
@@ -103,7 +112,7 @@ def group_command(
             planned = plan_groups_for_folder(
                 folder=folder_path,
                 image_paths=image_paths,
-                threshold=threshold,
+                threshold=effective_threshold,
                 min_group_size=min_group_size,
                 name_prefix=app_config.group.name_prefix,
                 max_workers=app_config.performance.max_workers,
@@ -125,6 +134,15 @@ def group_command(
         show_done_panel(console, created_groups, moved_files, mode, undo_log)
     else:
         show_dry_run_panel(console, len(folder_batches), len(groups), total_files)
+        show_intelligent_suggestions(
+            console,
+            threshold=effective_threshold,
+            folder_count=len(folder_batches),
+            group_count=len(groups),
+            total_files=total_files,
+            skipped_all_in_one=skipped_all_in_one,
+            max_workers=app_config.performance.max_workers,
+        )
         if sys.stdin.isatty() and Confirm.ask("是否立即执行 apply", default=True):
             moved_files, created_groups, undo_log = apply_groups(root=root, groups=groups, mode=mode, apply=True)
             show_done_panel(console, created_groups, moved_files, mode, undo_log)

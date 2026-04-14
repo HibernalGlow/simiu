@@ -39,6 +39,8 @@ simiu group "D:/path/to/artist_pack" --apply --mode move
 10. 配置支持：可通过 `simiu.toml` 自定义分组目录前缀。
 11. 性能优化：默认启用特征提取并行与比对剪枝，可在配置中调节并行度。
 12. 去重处理：默认跳过以 `name_prefix` 开头的目录（视为已处理，避免重复嵌套）。
+13. 阈值配置：支持在 `simiu.toml` 设置 `similarity.phash_threshold` 作为默认值。
+14. 智能建议：dry-run 后会根据分组结果给出阈值与并行配置建议。
 
 ## 命令引导
 
@@ -97,6 +99,16 @@ max_workers = 0
 
 - `0` 表示自动选择并行线程。
 - 大目录可手动设为 `8`、`12` 等以进一步提速。
+
+可选相似度配置：
+
+```toml
+[similarity]
+phash_threshold = 0.17
+```
+
+- 当命令行不传 `--threshold` 时，默认使用该值。
+- 阈值越小越严格，越大越宽松。
 
 - 从剪贴板读取路径：
 

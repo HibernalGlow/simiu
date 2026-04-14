@@ -16,9 +16,15 @@ class PerformanceConfig:
 
 
 @dataclass
+class SimilarityConfig:
+    phash_threshold: float = 0.17
+
+
+@dataclass
 class AppConfig:
     group: GroupConfig
     performance: PerformanceConfig
+    similarity: SimilarityConfig
     source_path: Path | None
 
 
@@ -87,8 +93,20 @@ def load_config(root: Path, config_path: str | None = None) -> AppConfig:
     if max_workers < 0:
         max_workers = 0
 
+    sim_data = data.get("similarity", {}) if isinstance(data, dict) else {}
+    raw_threshold = sim_data.get("phash_threshold", 0.17) if isinstance(sim_data, dict) else 0.17
+    try:
+        phash_threshold = float(raw_threshold)
+    except (TypeError, ValueError):
+        phash_threshold = 0.17
+    if phash_threshold <= 0:
+        phash_threshold = 0.17
+    if phash_threshold > 1:
+        phash_threshold = 1.0
+
     return AppConfig(
         group=GroupConfig(name_prefix=prefix),
         performance=PerformanceConfig(max_workers=max_workers),
+        similarity=SimilarityConfig(phash_threshold=phash_threshold),
         source_path=chosen,
     )

@@ -80,6 +80,44 @@ def show_dry_run_panel(console: Console, folder_count: int, group_count: int, to
     console.print("[cyan]提示: 添加 --apply 执行实际落盘[/cyan]")
 
 
+def show_intelligent_suggestions(
+    console: Console,
+    threshold: float,
+    folder_count: int,
+    group_count: int,
+    total_files: int,
+    skipped_all_in_one: int,
+    max_workers: int,
+) -> None:
+    if group_count <= 0:
+        return
+
+    avg_group_size = total_files / float(group_count)
+    suggestions: list[str] = []
+
+    if skipped_all_in_one > 0:
+        tighter = max(0.05, threshold - 0.03)
+        suggestions.append(
+            f"检测到 {skipped_all_in_one} 个目录出现全量单组，建议尝试更严格阈值 --threshold {tighter:.2f}"
+        )
+
+    if folder_count > 0 and group_count > folder_count * 2.2:
+        looser = min(1.0, threshold + 0.02)
+        suggestions.append(f"分组偏碎，建议尝试更宽松阈值 --threshold {looser:.2f}")
+    elif avg_group_size >= 7:
+        tighter = max(0.05, threshold - 0.02)
+        suggestions.append(f"平均组较大，建议尝试更严格阈值 --threshold {tighter:.2f}")
+
+    if total_files >= 600 and max_workers == 0:
+        suggestions.append("大批量图片可在配置中设置 [performance].max_workers = 8 或 12 提升速度")
+
+    if not suggestions:
+        suggestions.append("当前阈值表现稳定，可直接 apply")
+
+    text = "\n".join(f"- {s}" for s in suggestions)
+    console.print(Panel.fit(text, title="智能建议", border_style="magenta"))
+
+
 def show_entry_guide(console: Console) -> None:
     guide = (
         "直接输入 simiu 不带子命令时，可用以下入口:\n"
