@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 import threading
 
@@ -11,6 +12,26 @@ from PIL import Image
 from .models import ImageFeature
 
 _TLS = threading.local()
+
+
+def _load_pillow_codecs() -> None:
+    # Try common module names used by Pillow AVIF/JXL plugins.
+    for module_name in ("pillow_avif", "pillow_avif_plugin"):
+        try:
+            __import__(module_name)
+            break
+        except Exception:
+            continue
+
+    for module_name in ("pillow_jxl", "pillow_jxl_plugin"):
+        try:
+            __import__(module_name)
+            break
+        except Exception:
+            continue
+
+
+_load_pillow_codecs()
 
 
 def _opencv_phash_bits(gray_img: np.ndarray) -> np.ndarray | None:
@@ -52,7 +73,10 @@ def extract_feature(path: Path) -> ImageFeature | None:
             return None
         img_bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
         if img_bgr is None:
-            return None
+            # Fallback to Pillow for formats OpenCV may not decode (e.g. AVIF/JXL).
+            with Image.open(BytesIO(arr.tobytes())) as pim:
+                rgb = np.array(pim.convert("RGB"))
+            img_bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
 
         height, width = img_bgr.shape[:2]
         if width == 0 or height == 0:

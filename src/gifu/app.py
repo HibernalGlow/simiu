@@ -24,6 +24,26 @@ try:
 except Exception:  # noqa: BLE001
     pyperclip = None
 
+
+def _load_pillow_codecs() -> None:
+    # Try common module names used by Pillow AVIF/JXL plugins.
+    for module_name in ("pillow_avif", "pillow_avif_plugin"):
+        try:
+            __import__(module_name)
+            break
+        except Exception:
+            continue
+
+    for module_name in ("pillow_jxl", "pillow_jxl_plugin"):
+        try:
+            __import__(module_name)
+            break
+        except Exception:
+            continue
+
+
+_load_pillow_codecs()
+
 IMAGE_EXTS = {
     ".jpg",
     ".jpeg",

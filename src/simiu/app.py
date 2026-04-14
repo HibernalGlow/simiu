@@ -147,7 +147,6 @@ def undo_command(
         raise typer.Exit(2)
 
     console.print(f"[green]Undo 完成，已回滚操作数: {reverted}[/green]")
-！
 
 def main() -> None:
     app()
