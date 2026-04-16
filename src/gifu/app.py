@@ -284,6 +284,15 @@ def _normalize_canvas(
     return normalized
 
 
+def _cleanup_failed_output(output_path: Path) -> None:
+    try:
+        if output_path.exists() and output_path.is_file():
+            output_path.unlink()
+    except Exception:
+        # Cleanup failure should not mask the original conversion error.
+        pass
+
+
 def _convert_one_archive(
     archive_path: Path,
     output_path: Path,
@@ -318,132 +327,139 @@ def _convert_one_archive(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    if fmt == "gif":
-        first.save(
-            output_path,
-            format="GIF",
-            save_all=True,
-            append_images=rest,
-            duration=duration_ms,
-            loop=loop,
-            disposal=2,
-            optimize=False,
-        )
-    elif fmt == "webp":
-        first.save(
-            output_path,
-            format="WEBP",
-            save_all=True,
-            append_images=rest,
-            duration=duration_ms,
-            loop=loop,
-            quality=quality,
-            method=webp_method,
-            lossless=False,
-        )
-    elif fmt in {"webm", "mp4"}:
-        ffmpeg = shutil.which("ffmpeg")
-        if ffmpeg is None:
-            raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH")
+    try:
+        if fmt == "gif":
+            first.save(
+                output_path,
+                format="GIF",
+                save_all=True,
+                append_images=rest,
+                duration=duration_ms,
+                loop=loop,
+                disposal=2,
+                optimize=False,
+            )
+        elif fmt == "webp":
+            first.save(
+                output_path,
+                format="WEBP",
+                save_all=True,
+                append_images=rest,
+                duration=duration_ms,
+                loop=loop,
+                quality=quality,
+                method=webp_method,
+                lossless=False,
+            )
+        elif fmt in {"webm", "mp4"}:
+            ffmpeg = shutil.which("ffmpeg")
+            if ffmpeg is None:
+                raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH")
 
-        fps = 1000.0 / float(duration_ms)
-        width, height = first.size
+            fps = 1000.0 / float(duration_ms)
+            width, height = first.size
 
-        if fmt == "webm":
-            cmd = [
-                ffmpeg,
-                "-y",
-                "-f",
-                "rawvideo",
-                "-pixel_format",
-                "rgb24",
-                "-video_size",
-                f"{width}x{height}",
-                "-framerate",
-                f"{fps:.6f}",
-                "-i",
-                "-",
-                "-an",
-                "-c:v",
-                "libvpx-vp9",
-                "-pix_fmt",
-                "yuv420p",
-                "-b:v",
-                "0",
-                "-crf",
-                str(video_webm_crf),
-                "-deadline",
-                "realtime",
-                "-cpu-used",
-                str(video_webm_cpu_used),
-                "-row-mt",
-                "1",
-                str(output_path),
-            ]
+            if fmt == "webm":
+                cmd = [
+                    ffmpeg,
+                    "-y",
+                    "-f",
+                    "rawvideo",
+                    "-pixel_format",
+                    "rgb24",
+                    "-video_size",
+                    f"{width}x{height}",
+                    "-framerate",
+                    f"{fps:.6f}",
+                    "-i",
+                    "-",
+                    "-an",
+                    "-c:v",
+                    "libvpx-vp9",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-b:v",
+                    "0",
+                    "-crf",
+                    str(video_webm_crf),
+                    "-deadline",
+                    "realtime",
+                    "-cpu-used",
+                    str(video_webm_cpu_used),
+                    "-row-mt",
+                    "1",
+                    str(output_path),
+                ]
+            else:
+                # mp4 path is pinned to AV1 NVENC as requested.
+                cmd = [
+                    ffmpeg,
+                    "-y",
+                    "-f",
+                    "rawvideo",
+                    "-pixel_format",
+                    "rgb24",
+                    "-video_size",
+                    f"{width}x{height}",
+                    "-framerate",
+                    f"{fps:.6f}",
+                    "-i",
+                    "-",
+                    "-an",
+                    "-c:v",
+                    "av1_nvenc",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-preset",
+                    video_mp4_preset,
+                    "-cq:v",
+                    str(video_mp4_cq),
+                    str(output_path),
+                ]
+
+            if video_ffmpeg_threads > 0:
+                cmd[1:1] = ["-threads", str(video_ffmpeg_threads)]
+
+            proc = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+            )
+            stderr_text = ""
+            try:
+                assert proc.stdin is not None
+                proc.stdin.write(first.convert("RGB").tobytes())
+                for frame in rest:
+                    proc.stdin.write(frame.convert("RGB").tobytes())
+                proc.stdin.close()
+                stderr_text = (proc.stderr.read().decode("utf-8", errors="ignore") if proc.stderr else "")
+                code = proc.wait()
+                if code != 0:
+                    raise RuntimeError(f"ffmpeg 编码失败（{fmt}）: {stderr_text[-500:]}")
+            except BrokenPipeError:
+                stderr_text = (proc.stderr.read().decode("utf-8", errors="ignore") if proc.stderr else "")
+                proc.wait()
+                raise RuntimeError(f"ffmpeg 管道中断（{fmt}），通常是编码器参数不兼容: {stderr_text[-500:]}")
+            except Exception:
+                proc.kill()
+                raise
         else:
-            # mp4 path is pinned to AV1 NVENC as requested.
-            cmd = [
-                ffmpeg,
-                "-y",
-                "-f",
-                "rawvideo",
-                "-pixel_format",
-                "rgb24",
-                "-video_size",
-                f"{width}x{height}",
-                "-framerate",
-                f"{fps:.6f}",
-                "-i",
-                "-",
-                "-an",
-                "-c:v",
-                "av1_nvenc",
-                "-pix_fmt",
-                "yuv420p",
-                "-preset",
-                video_mp4_preset,
-                "-cq:v",
-                str(video_mp4_cq),
-                str(output_path),
-            ]
+            first.save(
+                output_path,
+                format="PNG",
+                save_all=True,
+                append_images=rest,
+                duration=duration_ms,
+                loop=loop,
+                optimize=False,
+            )
 
-        if video_ffmpeg_threads > 0:
-            cmd[1:1] = ["-threads", str(video_ffmpeg_threads)]
-
-        proc = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-        stderr_text = ""
-        try:
-            assert proc.stdin is not None
-            proc.stdin.write(first.convert("RGB").tobytes())
-            for frame in rest:
-                proc.stdin.write(frame.convert("RGB").tobytes())
-            proc.stdin.close()
-            stderr_text = (proc.stderr.read().decode("utf-8", errors="ignore") if proc.stderr else "")
-            code = proc.wait()
-            if code != 0:
-                raise RuntimeError(f"ffmpeg 编码失败（{fmt}）: {stderr_text[-500:]}")
-        except BrokenPipeError:
-            stderr_text = (proc.stderr.read().decode("utf-8", errors="ignore") if proc.stderr else "")
-            proc.wait()
-            raise RuntimeError(f"ffmpeg 管道中断（{fmt}），通常是编码器参数不兼容: {stderr_text[-500:]}")
-        except Exception:
-            proc.kill()
-            raise
-    else:
-        first.save(
-            output_path,
-            format="PNG",
-            save_all=True,
-            append_images=rest,
-            duration=duration_ms,
-            loop=loop,
-            optimize=False,
-        )
+        if not output_path.exists() or output_path.stat().st_size <= 0:
+            raise RuntimeError(f"输出文件无效（空文件）: {output_path}")
+    except Exception:
+        _cleanup_failed_output(output_path)
+        raise
 
     return ConvertResult(
         archive_path=archive_path,
