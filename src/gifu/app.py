@@ -257,10 +257,9 @@ def _normalize_canvas(frames: list[Image.Image]) -> list[Image.Image]:
         if frame.width == max_w and frame.height == max_h:
             normalized.append(frame)
             continue
-        canvas = Image.new("RGBA", (max_w, max_h), (0, 0, 0, 0))
-        offset = ((max_w - frame.width) // 2, (max_h - frame.height) // 2)
-        canvas.alpha_composite(frame, dest=offset)
-        normalized.append(canvas)
+        # Resize smaller/larger frames to a unified canvas size to avoid letterboxing.
+        resized = frame.resize((max_w, max_h), Image.Resampling.LANCZOS)
+        normalized.append(resized)
 
     return normalized
 
