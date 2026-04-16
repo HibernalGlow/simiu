@@ -85,6 +85,7 @@ class ConvertResult:
     archive_path: Path
     output_path: Path
     frame_count: int
+    skipped_frames: int
 
 
 @app.callback(invoke_without_command=True)
@@ -205,8 +206,12 @@ def _iter_zip_images(archive_path: Path):
             inner = Path(info.filename)
             if inner.suffix.lower() not in IMAGE_EXTS:
                 continue
-            with zf.open(info, "r") as fp:
-                yield fp.read()
+            try:
+                with zf.open(info, "r") as fp:
+                    yield fp.read()
+            except Exception:
+                # Skip corrupted entries and keep processing remaining frames.
+                continue
 
 
 def _iter_tar_images(archive_path: Path):
@@ -217,15 +222,19 @@ def _iter_tar_images(archive_path: Path):
             inner = Path(member.name)
             if inner.suffix.lower() not in IMAGE_EXTS:
                 continue
-            extracted = tf.extractfile(member)
-            if extracted is None:
+            try:
+                extracted = tf.extractfile(member)
+                if extracted is None:
+                    continue
+                data = extracted.read()
+                extracted.close()
+                yield data
+            except Exception:
+                # Skip corrupted entries and keep processing remaining frames.
                 continue
-            data = extracted.read()
-            extracted.close()
-            yield data
 
 
-def _load_frames_by_internal_order(archive_path: Path) -> list[Image.Image]:
+def _load_frames_by_internal_order(archive_path: Path) -> tuple[list[Image.Image], int]:
     low = archive_path.name.lower()
     if low.endswith(".zip") or low.endswith(".cbz"):
         data_iter = _iter_zip_images(archive_path)
@@ -238,14 +247,16 @@ def _load_frames_by_internal_order(archive_path: Path) -> list[Image.Image]:
         raise ValueError(f"不支持的压缩包格式: {archive_path}")
 
     frames: list[Image.Image] = []
+    skipped_frames = 0
     for data in data_iter:
         try:
             with Image.open(BytesIO(data)) as im:
                 frames.append(im.convert("RGBA").copy())
         except Exception:
             # Ignore unreadable image entries and continue.
+            skipped_frames += 1
             continue
-    return frames
+    return frames, skipped_frames
 
 
 def _normalize_canvas(
@@ -297,7 +308,7 @@ def _convert_one_archive(
     if output_path.exists() and not overwrite:
         raise FileExistsError(f"输出文件已存在: {output_path}")
 
-    frames = _load_frames_by_internal_order(archive_path)
+    frames, skipped_frames = _load_frames_by_internal_order(archive_path)
     if len(frames) < 2:
         raise ValueError("可用图片帧少于 2，无法生成动图")
 
@@ -438,6 +449,7 @@ def _convert_one_archive(
         archive_path=archive_path,
         output_path=output_path,
         frame_count=len(frames),
+        skipped_frames=skipped_frames,
     )
 
 
@@ -606,6 +618,8 @@ def _run_make(
                     f"[green]完成[/green] {escape(str(result.archive_path))} -> "
                     f"{escape(str(result.output_path))} ({result.frame_count} 帧)"
                 )
+                if result.skipped_frames > 0:
+                    console.print(f"[yellow]跳过损坏帧: {result.skipped_frames}[/yellow]")
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
@@ -642,6 +656,8 @@ def _run_make(
                         f"[green]完成[/green] {escape(str(result.archive_path))} -> "
                         f"{escape(str(result.output_path))} ({result.frame_count} 帧)"
                     )
+                    if result.skipped_frames > 0:
+                        console.print(f"[yellow]跳过损坏帧: {result.skipped_frames}[/yellow]")
                 except Exception as exc:  # noqa: BLE001
                     failed += 1
                     console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
