@@ -196,6 +196,13 @@ webp_method = 4
 duration_ms = 120
 loop = 0
 
+[video]
+ffmpeg_threads = 0
+webm_crf = 34
+webm_cpu_used = 6
+mp4_preset = "p3"
+mp4_cq = 32
+
 [naming]
 prefix = "[#dyna]"
 template = "{prefix}{stem}"
@@ -208,6 +215,8 @@ max_workers = 0
 `max_workers` 为并行转换线程数，`0` 表示自动。
 `duration_ms` 和 `loop` 可作为默认动画参数（命令行 `--duration` / `--loop` 可覆盖）。
 `webp_method` 取值 0-6，越低编码越快（文件可能更大）。
+视频可调参数：`ffmpeg_threads`、`webm_crf`、`webm_cpu_used`、`mp4_preset`、`mp4_cq`。
+无参数交互模式会按输出类型分支提问：选择视频时跳过图片编码选项，选择图片时跳过视频编码选项。
 
 视频输出说明：
 - `webm` 使用 `ffmpeg + libvpx-vp9` 编码。

@@ -248,9 +248,18 @@ def _load_frames_by_internal_order(archive_path: Path) -> list[Image.Image]:
     return frames
 
 
-def _normalize_canvas(frames: list[Image.Image]) -> list[Image.Image]:
+def _normalize_canvas(
+    frames: list[Image.Image],
+    resample: Image.Resampling,
+    force_even_size: bool,
+) -> list[Image.Image]:
     max_w = max(f.width for f in frames)
     max_h = max(f.height for f in frames)
+    if force_even_size:
+        if max_w % 2 == 1:
+            max_w += 1
+        if max_h % 2 == 1:
+            max_h += 1
     normalized: list[Image.Image] = []
 
     for frame in frames:
@@ -258,7 +267,7 @@ def _normalize_canvas(frames: list[Image.Image]) -> list[Image.Image]:
             normalized.append(frame)
             continue
         # Resize smaller/larger frames to a unified canvas size to avoid letterboxing.
-        resized = frame.resize((max_w, max_h), Image.Resampling.LANCZOS)
+        resized = frame.resize((max_w, max_h), resample)
         normalized.append(resized)
 
     return normalized
@@ -272,6 +281,11 @@ def _convert_one_archive(
     loop: int,
     quality: int,
     webp_method: int,
+    video_ffmpeg_threads: int,
+    video_webm_crf: int,
+    video_webm_cpu_used: int,
+    video_mp4_preset: str,
+    video_mp4_cq: int,
     overwrite: bool,
 ) -> ConvertResult:
     fmt = anim_format.lower()
@@ -287,7 +301,8 @@ def _convert_one_archive(
     if len(frames) < 2:
         raise ValueError("可用图片帧少于 2，无法生成动图")
 
-    frames = _normalize_canvas(frames)
+    resize_resample = Image.Resampling.BILINEAR if fmt in {"webm", "mp4"} else Image.Resampling.LANCZOS
+    frames = _normalize_canvas(frames, resize_resample, force_even_size=fmt in {"webm", "mp4"})
     first, rest = frames[0], frames[1:]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -330,7 +345,7 @@ def _convert_one_archive(
                 "-f",
                 "rawvideo",
                 "-pixel_format",
-                "rgba",
+                "rgb24",
                 "-video_size",
                 f"{width}x{height}",
                 "-framerate",
@@ -345,7 +360,13 @@ def _convert_one_archive(
                 "-b:v",
                 "0",
                 "-crf",
-                "32",
+                str(video_webm_crf),
+                "-deadline",
+                "realtime",
+                "-cpu-used",
+                str(video_webm_cpu_used),
+                "-row-mt",
+                "1",
                 str(output_path),
             ]
         else:
@@ -356,7 +377,7 @@ def _convert_one_archive(
                 "-f",
                 "rawvideo",
                 "-pixel_format",
-                "rgba",
+                "rgb24",
                 "-video_size",
                 f"{width}x{height}",
                 "-framerate",
@@ -369,11 +390,14 @@ def _convert_one_archive(
                 "-pix_fmt",
                 "yuv420p",
                 "-preset",
-                "p4",
+                video_mp4_preset,
                 "-cq:v",
-                "30",
+                str(video_mp4_cq),
                 str(output_path),
             ]
+
+        if video_ffmpeg_threads > 0:
+            cmd[1:1] = ["-threads", str(video_ffmpeg_threads)]
 
         proc = subprocess.Popen(
             cmd,
@@ -381,16 +405,21 @@ def _convert_one_archive(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
         )
+        stderr_text = ""
         try:
             assert proc.stdin is not None
-            proc.stdin.write(first.tobytes())
+            proc.stdin.write(first.convert("RGB").tobytes())
             for frame in rest:
-                proc.stdin.write(frame.tobytes())
+                proc.stdin.write(frame.convert("RGB").tobytes())
             proc.stdin.close()
-            stderr = (proc.stderr.read().decode("utf-8", errors="ignore") if proc.stderr else "")
+            stderr_text = (proc.stderr.read().decode("utf-8", errors="ignore") if proc.stderr else "")
             code = proc.wait()
             if code != 0:
-                raise RuntimeError(f"ffmpeg 编码失败（{fmt}）: {stderr[-500:]}")
+                raise RuntimeError(f"ffmpeg 编码失败（{fmt}）: {stderr_text[-500:]}")
+        except BrokenPipeError:
+            stderr_text = (proc.stderr.read().decode("utf-8", errors="ignore") if proc.stderr else "")
+            proc.wait()
+            raise RuntimeError(f"ffmpeg 管道中断（{fmt}），通常是编码器参数不兼容: {stderr_text[-500:]}")
         except Exception:
             proc.kill()
             raise
@@ -444,6 +473,11 @@ def _run_make(
     loop: int | None,
     quality: int | None,
     webp_method: int | None,
+    video_ffmpeg_threads: int | None,
+    video_webm_crf: int | None,
+    video_webm_cpu_used: int | None,
+    video_mp4_preset: str | None,
+    video_mp4_cq: int | None,
     name_prefix: str | None,
     name_template: str | None,
     max_workers: int | None,
@@ -459,6 +493,15 @@ def _run_make(
     effective_loop = loop if loop is not None else app_config.output.loop
     effective_quality = quality if quality is not None else app_config.output.quality
     effective_webp_method = webp_method if webp_method is not None else app_config.output.webp_method
+    effective_video_ffmpeg_threads = (
+        video_ffmpeg_threads if video_ffmpeg_threads is not None else app_config.video.ffmpeg_threads
+    )
+    effective_video_webm_crf = video_webm_crf if video_webm_crf is not None else app_config.video.webm_crf
+    effective_video_webm_cpu_used = (
+        video_webm_cpu_used if video_webm_cpu_used is not None else app_config.video.webm_cpu_used
+    )
+    effective_video_mp4_preset = video_mp4_preset if video_mp4_preset is not None else app_config.video.mp4_preset
+    effective_video_mp4_cq = video_mp4_cq if video_mp4_cq is not None else app_config.video.mp4_cq
     effective_prefix = name_prefix if name_prefix is not None else app_config.naming.prefix
     effective_template = name_template if name_template is not None else app_config.naming.template
 
@@ -480,6 +523,21 @@ def _run_make(
         raise typer.Exit(2)
     if effective_webp_method < 0 or effective_webp_method > 6:
         console.print("[red]webp-method 必须在 0-6[/red]")
+        raise typer.Exit(2)
+    if effective_video_ffmpeg_threads < 0:
+        console.print("[red]video-ffmpeg-threads 必须大于等于 0[/red]")
+        raise typer.Exit(2)
+    if effective_video_webm_crf < 0 or effective_video_webm_crf > 63:
+        console.print("[red]video-webm-crf 必须在 0-63[/red]")
+        raise typer.Exit(2)
+    if effective_video_webm_cpu_used < 0 or effective_video_webm_cpu_used > 8:
+        console.print("[red]video-webm-cpu-used 必须在 0-8[/red]")
+        raise typer.Exit(2)
+    if effective_video_mp4_preset not in {"p1", "p2", "p3", "p4", "p5", "p6", "p7"}:
+        console.print("[red]video-mp4-preset 必须是 p1-p7[/red]")
+        raise typer.Exit(2)
+    if effective_video_mp4_cq < 0 or effective_video_mp4_cq > 63:
+        console.print("[red]video-mp4-cq 必须在 0-63[/red]")
         raise typer.Exit(2)
 
     raw_inputs: list[Path] = [Path(p) for p in archives]
@@ -535,6 +593,11 @@ def _run_make(
                     loop=effective_loop,
                     quality=effective_quality,
                     webp_method=effective_webp_method,
+                    video_ffmpeg_threads=effective_video_ffmpeg_threads,
+                    video_webm_crf=effective_video_webm_crf,
+                    video_webm_cpu_used=effective_video_webm_cpu_used,
+                    video_mp4_preset=effective_video_mp4_preset,
+                    video_mp4_cq=effective_video_mp4_cq,
                     overwrite=overwrite,
                 )
                 ok += 1
@@ -560,6 +623,11 @@ def _run_make(
                     effective_loop,
                     effective_quality,
                     effective_webp_method,
+                    effective_video_ffmpeg_threads,
+                    effective_video_webm_crf,
+                    effective_video_webm_cpu_used,
+                    effective_video_mp4_preset,
+                    effective_video_mp4_cq,
                     overwrite,
                 )
                 future_map[fut] = archive_path
@@ -617,10 +685,59 @@ def _interactive_entry() -> None:
         choices=["gif", "webp", "apng", "webm", "mp4", "auto"],
         default=app_config.output.format,
     )
+    is_video_output = fmt in {"webm", "mp4"}
+    is_webp_output = fmt in {"webp", "auto"}
+
     duration_ms = int(Prompt.ask("每帧时长毫秒", default=str(app_config.output.duration_ms)))
-    loop = int(Prompt.ask("循环次数（0 为无限）", default=str(app_config.output.loop)))
-    quality = int(Prompt.ask("webp 质量（1-100）", default=str(app_config.output.quality)))
-    webp_method = int(Prompt.ask("webp 编码速度档位（0-6，越低越快）", default=str(app_config.output.webp_method)))
+
+    loop: int | None
+    quality: int | None
+    webp_method: int | None
+    video_ffmpeg_threads: int | None
+    video_webm_crf: int | None
+    video_webm_cpu_used: int | None
+    video_mp4_preset: str | None
+    video_mp4_cq: int | None
+
+    if is_video_output:
+        loop = None
+        quality = None
+        webp_method = None
+        video_ffmpeg_threads = int(
+            Prompt.ask("ffmpeg 线程数（0 自动）", default=str(app_config.video.ffmpeg_threads))
+        )
+        if fmt == "webm":
+            video_webm_crf = int(Prompt.ask("webm CRF（0-63，越大越快越小）", default=str(app_config.video.webm_crf)))
+            video_webm_cpu_used = int(
+                Prompt.ask("webm cpu-used（0-8，越大越快）", default=str(app_config.video.webm_cpu_used))
+            )
+            video_mp4_preset = None
+            video_mp4_cq = None
+        else:
+            video_mp4_preset = Prompt.ask(
+                "mp4 NVENC preset（p1-p7，越小越快）",
+                choices=["p1", "p2", "p3", "p4", "p5", "p6", "p7"],
+                default=app_config.video.mp4_preset,
+            )
+            video_mp4_cq = int(Prompt.ask("mp4 CQ（0-63，越小越清晰）", default=str(app_config.video.mp4_cq)))
+            video_webm_crf = None
+            video_webm_cpu_used = None
+    else:
+        loop = int(Prompt.ask("循环次数（0 为无限）", default=str(app_config.output.loop)))
+        video_ffmpeg_threads = None
+        video_webm_crf = None
+        video_webm_cpu_used = None
+        video_mp4_preset = None
+        video_mp4_cq = None
+        if is_webp_output:
+            quality = int(Prompt.ask("webp 质量（1-100）", default=str(app_config.output.quality)))
+            webp_method = int(
+                Prompt.ask("webp 编码速度档位（0-6，越低越快）", default=str(app_config.output.webp_method))
+            )
+        else:
+            quality = None
+            webp_method = None
+
     workers = int(Prompt.ask("并行线程数（0 自动）", default=str(app_config.performance.max_workers)))
     name_prefix = Prompt.ask("输出名前缀", default=app_config.naming.prefix)
     name_template = Prompt.ask("命名模板（可用 {prefix} {stem} {archive} {parent}）", default=app_config.naming.template)
@@ -640,6 +757,11 @@ def _interactive_entry() -> None:
         loop=loop,
         quality=quality,
         webp_method=webp_method,
+        video_ffmpeg_threads=video_ffmpeg_threads,
+        video_webm_crf=video_webm_crf,
+        video_webm_cpu_used=video_webm_cpu_used,
+        video_mp4_preset=video_mp4_preset,
+        video_mp4_cq=video_mp4_cq,
         name_prefix=name_prefix,
         name_template=name_template,
         max_workers=workers,
@@ -661,6 +783,11 @@ def make_command(
     loop: int | None = typer.Option(None, "--loop", help="循环次数，0 为无限，默认读取配置"),
     quality: int | None = typer.Option(None, "--quality", help="webp 质量（1-100）"),
     webp_method: int | None = typer.Option(None, "--webp-method", help="webp 编码档位 0-6，越低越快"),
+    video_ffmpeg_threads: int | None = typer.Option(None, "--video-ffmpeg-threads", help="视频 ffmpeg 线程数，0 自动"),
+    video_webm_crf: int | None = typer.Option(None, "--video-webm-crf", help="webm CRF 0-63，越大速度越快"),
+    video_webm_cpu_used: int | None = typer.Option(None, "--video-webm-cpu-used", help="webm cpu-used 0-8，越大速度越快"),
+    video_mp4_preset: str | None = typer.Option(None, "--video-mp4-preset", help="mp4 av1_nvenc preset p1-p7，越小越快"),
+    video_mp4_cq: int | None = typer.Option(None, "--video-mp4-cq", help="mp4 CQ 0-63，越小画质越高"),
     max_workers: int | None = typer.Option(None, "--max-workers", help="并行线程数，默认读取配置，0 自动"),
     name_prefix: str | None = typer.Option(None, "--name-prefix", help="输出名前缀，默认来自配置"),
     name_template: str | None = typer.Option(None, "--name-template", help="命名模板，默认来自配置"),
@@ -678,6 +805,11 @@ def make_command(
         loop=loop,
         quality=quality,
         webp_method=webp_method,
+        video_ffmpeg_threads=video_ffmpeg_threads,
+        video_webm_crf=video_webm_crf,
+        video_webm_cpu_used=video_webm_cpu_used,
+        video_mp4_preset=video_mp4_preset,
+        video_mp4_cq=video_mp4_cq,
         name_prefix=name_prefix,
         name_template=name_template,
         max_workers=max_workers,

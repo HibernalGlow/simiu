@@ -43,6 +43,11 @@ def test_gifu_webp_fps_at_least_5(tmp_path: Path) -> None:
         loop=0,
         quality=85,
         webp_method=2,
+        video_ffmpeg_threads=0,
+        video_webm_crf=34,
+        video_webm_cpu_used=6,
+        video_mp4_preset="p3",
+        video_mp4_cq=32,
         overwrite=True,
     )
     elapsed = max(0.0001, time.perf_counter() - started)
