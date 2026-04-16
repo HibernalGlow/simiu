@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from io import BytesIO
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import time
 from typing import Iterable
 import tarfile
@@ -67,14 +69,14 @@ ARCHIVE_EXTS = {
     ".tar.xz",
     ".txz",
 }
-ANIM_FORMATS = {"gif", "webp", "apng"}
+OUTPUT_FORMATS = {"gif", "webp", "apng", "webm", "mp4"}
 
 console = Console(highlight=False)
 app = typer.Typer(
     add_completion=False,
     no_args_is_help=False,
     rich_markup_mode="rich",
-    help="Batch convert archives to animated gif/webp/apng by internal file order.",
+    help="Batch convert archives to animated gif/webp/apng/webm/mp4 by internal file order.",
 )
 
 
@@ -276,7 +278,7 @@ def _convert_one_archive(
     fmt = anim_format.lower()
     if fmt == "auto":
         fmt = "webp"
-    if fmt not in ANIM_FORMATS:
+    if fmt not in OUTPUT_FORMATS:
         raise ValueError(f"不支持的输出格式: {anim_format}")
 
     if output_path.exists() and not overwrite:
@@ -314,6 +316,85 @@ def _convert_one_archive(
             method=webp_method,
             lossless=False,
         )
+    elif fmt in {"webm", "mp4"}:
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise RuntimeError("未找到 ffmpeg，请先安装并加入 PATH")
+
+        fps = 1000.0 / float(duration_ms)
+        width, height = first.size
+
+        if fmt == "webm":
+            cmd = [
+                ffmpeg,
+                "-y",
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "rgba",
+                "-video_size",
+                f"{width}x{height}",
+                "-framerate",
+                f"{fps:.6f}",
+                "-i",
+                "-",
+                "-an",
+                "-c:v",
+                "libvpx-vp9",
+                "-pix_fmt",
+                "yuv420p",
+                "-b:v",
+                "0",
+                "-crf",
+                "32",
+                str(output_path),
+            ]
+        else:
+            # mp4 path is pinned to AV1 NVENC as requested.
+            cmd = [
+                ffmpeg,
+                "-y",
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "rgba",
+                "-video_size",
+                f"{width}x{height}",
+                "-framerate",
+                f"{fps:.6f}",
+                "-i",
+                "-",
+                "-an",
+                "-c:v",
+                "av1_nvenc",
+                "-pix_fmt",
+                "yuv420p",
+                "-preset",
+                "p4",
+                "-cq:v",
+                "30",
+                str(output_path),
+            ]
+
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write(first.tobytes())
+            for frame in rest:
+                proc.stdin.write(frame.tobytes())
+            proc.stdin.close()
+            stderr = (proc.stderr.read().decode("utf-8", errors="ignore") if proc.stderr else "")
+            code = proc.wait()
+            if code != 0:
+                raise RuntimeError(f"ffmpeg 编码失败（{fmt}）: {stderr[-500:]}")
+        except Exception:
+            proc.kill()
+            raise
     else:
         first.save(
             output_path,
@@ -386,8 +467,8 @@ def _run_make(
         effective_template = f"{effective_template}{{stem}}"
 
     fmt = effective_fmt
-    if fmt not in {"gif", "webp", "apng", "auto"}:
-        console.print("[red]format 仅支持: gif, webp, apng, auto[/red]")
+    if fmt not in {"gif", "webp", "apng", "webm", "mp4", "auto"}:
+        console.print("[red]format 仅支持: gif, webp, apng, webm, mp4, auto[/red]")
         raise typer.Exit(2)
     if effective_duration_ms <= 0:
         console.print("[red]duration 必须大于 0[/red]")
@@ -534,7 +615,7 @@ def _interactive_entry() -> None:
     recursive = Confirm.ask("输入包含目录时是否递归查找压缩包", default=True)
     fmt = Prompt.ask(
         "输出格式",
-        choices=["gif", "webp", "apng", "auto"],
+        choices=["gif", "webp", "apng", "webm", "mp4", "auto"],
         default=app_config.output.format,
     )
     duration_ms = int(Prompt.ask("每帧时长毫秒", default=str(app_config.output.duration_ms)))
@@ -576,7 +657,7 @@ def make_command(
     recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="输入目录时是否递归查找压缩包"),
     out_dir: str | None = typer.Option(None, "--out-dir", help="输出目录，不传则输出到各压缩包同目录"),
     config: str | None = typer.Option(None, "--config", help="gifu 配置文件路径"),
-    fmt: str | None = typer.Option(None, "--format", help="输出格式: gif|webp|apng|auto", case_sensitive=False),
+    fmt: str | None = typer.Option(None, "--format", help="输出格式: gif|webp|apng|webm|mp4|auto", case_sensitive=False),
     duration_ms: int | None = typer.Option(None, "--duration", help="每帧时长（毫秒），默认读取配置"),
     loop: int | None = typer.Option(None, "--loop", help="循环次数，0 为无限，默认读取配置"),
     quality: int | None = typer.Option(None, "--quality", help="webp 质量（1-100）"),

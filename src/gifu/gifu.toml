@@ -1,6 +1,6 @@
 [output]
-# gif | webp | apng | auto
-format = "webp"
+# gif | webp | apng | webm | mp4 | auto
+format = "mp4"
 quality = 85
 # webp 编码档位 0-6，越低越快
 webp_method = 4

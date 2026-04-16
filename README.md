@@ -144,7 +144,7 @@ simiu undo "D:/pack/.simiu-undo-20260414-120000.json"
 
 ## gifu（压缩包转动图）
 
-按压缩包内部文件顺序读取图片，批量转换为 gif/webp/apng。
+按压缩包内部文件顺序读取图片，批量转换为 gif/webp/apng/webm/mp4。
 支持常见输入帧格式，包括 jpg/png/webp/gif/tiff/bmp/avif/jxl。
 
 - 无参数直接进入交互引导：
@@ -169,6 +169,13 @@ gifu make "D:/packs" --recursive --format webp
 
 ```bash
 gifu make --list-file "D:/archive_list.txt" --format apng
+```
+
+- 直接输出视频：
+
+```bash
+gifu make "D:/packs" --format webm
+gifu make "D:/packs" --format mp4
 ```
 
 - 使用配置文件设置默认格式/质量/命名：
@@ -201,6 +208,10 @@ max_workers = 0
 `max_workers` 为并行转换线程数，`0` 表示自动。
 `duration_ms` 和 `loop` 可作为默认动画参数（命令行 `--duration` / `--loop` 可覆盖）。
 `webp_method` 取值 0-6，越低编码越快（文件可能更大）。
+
+视频输出说明：
+- `webm` 使用 `ffmpeg + libvpx-vp9` 编码。
+- `mp4` 使用 `ffmpeg + av1_nvenc`（需 NVIDIA 驱动/硬件支持）。
 
 性能回归测试（目标 >= 5 帧/s）：
 
