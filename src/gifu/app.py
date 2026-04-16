@@ -373,6 +373,8 @@ def _convert_one_archive(
                     f"{fps:.6f}",
                     "-i",
                     "-",
+                    "-vsync",
+                    "0",
                     "-an",
                     "-c:v",
                     "libvpx-vp9",
@@ -405,6 +407,8 @@ def _convert_one_archive(
                     f"{fps:.6f}",
                     "-i",
                     "-",
+                    "-vsync",
+                    "0",
                     "-an",
                     "-c:v",
                     "av1_nvenc",
@@ -441,10 +445,15 @@ def _convert_one_archive(
                 code = proc.wait()
                 if code != 0:
                     raise RuntimeError(f"ffmpeg 编码失败（{fmt}）: {stderr_text[-500:]}")
-            except BrokenPipeError:
+            except (BrokenPipeError, OSError) as pipe_exc:
                 stderr_text = (proc.stderr.read().decode("utf-8", errors="ignore") if proc.stderr else "")
                 proc.wait()
-                raise RuntimeError(f"ffmpeg 管道中断（{fmt}），通常是编码器参数不兼容: {stderr_text[-500:]}")
+                errno_note = ""
+                if isinstance(pipe_exc, OSError) and getattr(pipe_exc, "errno", None) is not None:
+                    errno_note = f" errno={pipe_exc.errno}"
+                raise RuntimeError(
+                    f"ffmpeg 管道中断（{fmt}{errno_note}），通常是编码器/参数不兼容: {stderr_text[-500:]}"
+                )
             except Exception:
                 proc.kill()
                 raise
@@ -608,6 +617,9 @@ def _run_make(
     output_root = Path(out_dir).expanduser().resolve() if out_dir else None
     workers = _resolve_max_workers(max_workers, app_config.performance.max_workers, len(archives_found))
     console.print(f"[blue]并行线程: {workers}[/blue]")
+    if fmt in {"webm", "mp4"}:
+        video_fps = 1000.0 / float(effective_duration_ms)
+        console.print(f"[blue]视频输出帧率: {video_fps:.3f} fps[/blue]")
 
     ok = 0
     failed = 0
