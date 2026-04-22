@@ -238,6 +238,30 @@ def _iter_tar_images(archive_path: Path):
                 continue
 
 
+def _count_image_entries(archive_path: Path) -> int:
+    """快速统计压缩包内图片文件数量（不解码内容，仅按扩展名判断）。"""
+    low = archive_path.name.lower()
+    count = 0
+    if low.endswith(".zip") or low.endswith(".cbz"):
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                if Path(info.filename).suffix.lower() in IMAGE_EXTS:
+                    count += 1
+    elif any(
+        low.endswith(ext)
+        for ext in (".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+    ):
+        with tarfile.open(archive_path, "r:*") as tf:
+            for member in tf.getmembers():
+                if not member.isfile():
+                    continue
+                if Path(member.name).suffix.lower() in IMAGE_EXTS:
+                    count += 1
+    return count
+
+
 def _load_frames_by_internal_order(archive_path: Path) -> tuple[list[Image.Image], int]:
     low = archive_path.name.lower()
     if low.endswith(".zip") or low.endswith(".cbz"):
@@ -666,13 +690,32 @@ def _run_make(
 
     console.print(f"[blue]扫描完成，可处理压缩包: {len(archives_found)} 个[/blue]")
 
+    # 提前检测并跳过单图压缩包（不解码图片内容，仅按扩展名统计）
+    archives_to_process: list[Path] = []
+    pre_skipped = 0
+    for archive_path in archives_found:
+        img_count = _count_image_entries(archive_path)
+        if img_count < 2:
+            pre_skipped += 1
+            console.print(
+                f"[yellow]跳过[/yellow] {escape(str(archive_path))}: "
+                f"自动跳过单图压缩包（可用图片帧少于 2，无法生成动图）"
+            )
+        else:
+            archives_to_process.append(archive_path)
+    if pre_skipped > 0:
+        console.print(f"[yellow]预检跳过单图压缩包: {pre_skipped} 个[/yellow]")
+    if not archives_to_process:
+        console.print("[yellow]无有效多图压缩包可处理[/yellow]")
+        raise typer.Exit(0)
+
     target_ext = ".webp" if fmt == "auto" else f".{fmt}"
     output_root = Path(out_dir).expanduser().resolve() if out_dir else None
 
     # 计算 separate 模式需要的公共祖先目录
     common_root: Path | None = None
     if effective_out_mode == "separate":
-        common_root = _find_common_parent(archives_found)
+        common_root = _find_common_parent(archives_to_process)
         if output_root is not None:
             console.print(
                 f"[blue]独立输出模式: 公共目录 {escape(str(common_root))} -> "
@@ -683,7 +726,7 @@ def _run_make(
                 f"[blue]独立输出模式: 公共目录 {escape(str(common_root))} -> "
                 f"输出至 {escape(str(common_root.parent))} 下 {effective_prefix}{escape(common_root.name)}/[/blue]"
             )
-    workers = _resolve_max_workers(max_workers, app_config.performance.max_workers, len(archives_found))
+    workers = _resolve_max_workers(max_workers, app_config.performance.max_workers, len(archives_to_process))
     console.print(f"[blue]并行线程: {workers}[/blue]")
     if fmt in {"webm", "mp4"}:
         video_fps = 1000.0 / float(effective_duration_ms)
@@ -695,7 +738,7 @@ def _run_make(
     total_frames = 0
     started = time.perf_counter()
     if workers == 1:
-        for archive_path in archives_found:
+        for archive_path in archives_to_process:
             output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix, effective_out_mode, common_root)
             try:
                 result = _convert_one_archive(
@@ -730,7 +773,7 @@ def _run_make(
     else:
         future_map = {}
         with ProcessPoolExecutor(max_workers=workers) as executor:
-            for archive_path in archives_found:
+            for archive_path in archives_to_process:
                 output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix, effective_out_mode, common_root)
                 fut = executor.submit(
                     _convert_one_archive,
@@ -772,7 +815,7 @@ def _run_make(
     elapsed = max(0.0001, time.perf_counter() - started)
     fps = total_frames / elapsed
     console.print(f"[cyan]性能: {total_frames} 帧 / {elapsed:.2f}s = {fps:.2f} 帧/s[/cyan]")
-    console.print(f"[cyan]处理完成: 成功 {ok}，跳过 {skipped}，失败 {failed}，总计 {len(archives_found)}[/cyan]")
+    console.print(f"[cyan]处理完成: 成功 {ok}，跳过 {skipped + pre_skipped}，失败 {failed}，总计 {len(archives_found)}[/cyan]")
 
 
 def _interactive_entry() -> None:
