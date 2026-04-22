@@ -1,6 +1,6 @@
 [output]
 # gif | webp | apng | webm | mp4 | auto
-format = "mp4"
+format = "webp"
 quality = 85
 # webp 编码档位 0-6，越低越快
 webp_method = 4
@@ -8,6 +8,8 @@ webp_method = 4
 duration_ms = 420
 # 循环次数，0 为无限
 loop = 0
+# 输出模式: same(与压缩包同目录) | separate(上一级创建prefix子文件夹)
+out_mode = "same"
 
 [video]
 # 视频编码线程，0 自动

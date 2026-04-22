@@ -496,7 +496,51 @@ def _resolve_max_workers(max_workers: int | None, config_workers: int, task_coun
     return max(1, min(auto, task_count))
 
 
-def _build_output_path(archive_path: Path, output_root: Path | None, target_ext: str, template: str, prefix: str) -> Path:
+def _find_common_parent(paths: list[Path]) -> Path:
+    """找到所有路径的公共祖先目录。
+
+    对于文件，取其所在目录；然后求所有目录的最长公共前缀。
+    """
+    if not paths:
+        return Path.cwd()
+    if len(paths) == 1:
+        return paths[0].parent if paths[0].is_file() else paths[0]
+
+    dirs = [p.parent if p.is_file() else p for p in paths]
+    common = dirs[0]
+    for d in dirs[1:]:
+        # 逐级缩短 common 直到 d 是 common 的后代
+        while not d.is_relative_to(common) and common != common.parent:
+            common = common.parent
+        if common == common.parent:
+            # 已到根目录
+            break
+    return common
+
+
+def _build_output_path(
+    archive_path: Path,
+    output_root: Path | None,
+    target_ext: str,
+    template: str,
+    prefix: str,
+    out_mode: str = "same",
+    common_root: Path | None = None,
+) -> Path:
+    if out_mode == "separate":
+        # 公共祖先目录（默认回退到压缩包所在目录）
+        root = common_root if common_root is not None else archive_path.parent
+        # 输出基础目录 = common_root 的上一级（或指定的 output_root）
+        base = output_root if output_root is not None else root.parent
+        # 最顶层文件夹名加 prefix
+        root_name = root.name or "output"
+        prefixed_dir = _sanitize_output_stem(f"{prefix}{root_name}")
+        # 压缩包相对于 common_root 的相对路径结构
+        rel = archive_path.parent.relative_to(root)
+        # 文件名不加 prefix（prefix 已体现在顶层文件夹名上）
+        out_stem = _render_output_stem(archive_path, "{stem}", "")
+        return base / prefixed_dir / rel / f"{out_stem}{target_ext}"
+    # same 模式（默认）：输出到压缩包同目录
     out_stem = _render_output_stem(archive_path, template, prefix)
     if output_root is not None:
         return output_root / f"{out_stem}{target_ext}"
@@ -509,6 +553,7 @@ def _run_make(
     clipboard: bool,
     recursive: bool,
     out_dir: str | None,
+    out_mode: str | None,
     fmt: str | None,
     duration_ms: int | None,
     loop: int | None,
@@ -545,6 +590,10 @@ def _run_make(
     effective_video_mp4_cq = video_mp4_cq if video_mp4_cq is not None else app_config.video.mp4_cq
     effective_prefix = name_prefix if name_prefix is not None else app_config.naming.prefix
     effective_template = name_template if name_template is not None else app_config.naming.template
+    effective_out_mode = (out_mode or app_config.output.out_mode).lower()
+    if effective_out_mode not in {"same", "separate"}:
+        console.print("[red]out-mode 仅支持: same, separate[/red]")
+        raise typer.Exit(2)
 
     if "{stem}" not in effective_template:
         effective_template = f"{effective_template}{{stem}}"
@@ -615,6 +664,21 @@ def _run_make(
 
     target_ext = ".webp" if fmt == "auto" else f".{fmt}"
     output_root = Path(out_dir).expanduser().resolve() if out_dir else None
+
+    # 计算 separate 模式需要的公共祖先目录
+    common_root: Path | None = None
+    if effective_out_mode == "separate":
+        common_root = _find_common_parent(archives_found)
+        if output_root is not None:
+            console.print(
+                f"[blue]独立输出模式: 公共目录 {escape(str(common_root))} -> "
+                f"输出至 {escape(str(output_root))} 下 {effective_prefix}{escape(common_root.name)}/[/blue]"
+            )
+        else:
+            console.print(
+                f"[blue]独立输出模式: 公共目录 {escape(str(common_root))} -> "
+                f"输出至 {escape(str(common_root.parent))} 下 {effective_prefix}{escape(common_root.name)}/[/blue]"
+            )
     workers = _resolve_max_workers(max_workers, app_config.performance.max_workers, len(archives_found))
     console.print(f"[blue]并行线程: {workers}[/blue]")
     if fmt in {"webm", "mp4"}:
@@ -627,7 +691,7 @@ def _run_make(
     started = time.perf_counter()
     if workers == 1:
         for archive_path in archives_found:
-            output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix)
+            output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix, effective_out_mode, common_root)
             try:
                 result = _convert_one_archive(
                     archive_path=archive_path,
@@ -659,7 +723,7 @@ def _run_make(
         future_map = {}
         with ProcessPoolExecutor(max_workers=workers) as executor:
             for archive_path in archives_found:
-                output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix)
+                output_path = _build_output_path(archive_path, output_root, target_ext, effective_template, effective_prefix, effective_out_mode, common_root)
                 fut = executor.submit(
                     _convert_one_archive,
                     archive_path,
@@ -791,7 +855,8 @@ def _interactive_entry() -> None:
     name_template = Prompt.ask("命名模板（可用 {prefix} {stem} {archive} {parent}）", default=app_config.naming.template)
     overwrite = Confirm.ask("输出已存在时是否覆盖", default=False)
 
-    out_dir_raw = Prompt.ask("输出目录（留空则与原压缩包同目录）", default="")
+    out_mode = Prompt.ask("输出模式", choices=["same", "separate"], default="same")
+    out_dir_raw = Prompt.ask("输出目录（留空则 same 模式与原压缩包同目录 / separate 模式为压缩包上一级）", default="")
     out_dir = _clean_line_path(out_dir_raw) or None
 
     _run_make(
@@ -800,6 +865,7 @@ def _interactive_entry() -> None:
         clipboard=use_clipboard,
         recursive=recursive,
         out_dir=out_dir,
+        out_mode=out_mode,
         fmt=fmt,
         duration_ms=duration_ms,
         loop=loop,
@@ -825,6 +891,7 @@ def make_command(
     clipboard: bool = typer.Option(False, "--clipboard", help="从剪贴板读取路径列表（每行一个）"),
     recursive: bool = typer.Option(True, "--recursive/--no-recursive", help="输入目录时是否递归查找压缩包"),
     out_dir: str | None = typer.Option(None, "--out-dir", help="输出目录，不传则输出到各压缩包同目录"),
+    out_mode: str | None = typer.Option(None, "--out-mode", help="输出模式: same(同目录) | separate(上一级创建prefix子文件夹)"),
     config: str | None = typer.Option(None, "--config", help="gifu 配置文件路径"),
     fmt: str | None = typer.Option(None, "--format", help="输出格式: gif|webp|apng|webm|mp4|auto", case_sensitive=False),
     duration_ms: int | None = typer.Option(None, "--duration", help="每帧时长（毫秒），默认读取配置"),
@@ -847,6 +914,7 @@ def make_command(
         clipboard=clipboard,
         recursive=recursive,
         out_dir=out_dir,
+        out_mode=out_mode,
         config=config,
         fmt=fmt,
         duration_ms=duration_ms,
