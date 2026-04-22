@@ -88,6 +88,10 @@ class ConvertResult:
     skipped_frames: int
 
 
+class SkipArchiveError(Exception):
+    """压缩包因合理原因被跳过（如单图、无有效帧等），不算失败。"""
+
+
 @app.callback(invoke_without_command=True)
 def entry(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
@@ -319,7 +323,7 @@ def _convert_one_archive(
 
     frames, skipped_frames = _load_frames_by_internal_order(archive_path)
     if len(frames) < 2:
-        raise ValueError("可用图片帧少于 2，无法生成动图")
+        raise SkipArchiveError("自动跳过单图压缩包（可用图片帧少于 2，无法生成动图）")
 
     resize_resample = Image.Resampling.BILINEAR if fmt in {"webm", "mp4"} else Image.Resampling.LANCZOS
     frames = _normalize_canvas(frames, resize_resample, force_even_size=fmt in {"webm", "mp4"})
@@ -687,6 +691,7 @@ def _run_make(
 
     ok = 0
     failed = 0
+    skipped = 0
     total_frames = 0
     started = time.perf_counter()
     if workers == 1:
@@ -716,6 +721,9 @@ def _run_make(
                 )
                 if result.skipped_frames > 0:
                     console.print(f"[yellow]跳过损坏帧: {result.skipped_frames}[/yellow]")
+            except SkipArchiveError as exc:
+                skipped += 1
+                console.print(f"[yellow]跳过[/yellow] {escape(str(archive_path))}: {escape(str(exc))}")
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
@@ -754,6 +762,9 @@ def _run_make(
                     )
                     if result.skipped_frames > 0:
                         console.print(f"[yellow]跳过损坏帧: {result.skipped_frames}[/yellow]")
+                except SkipArchiveError as exc:
+                    skipped += 1
+                    console.print(f"[yellow]跳过[/yellow] {escape(str(archive_path))}: {escape(str(exc))}")
                 except Exception as exc:  # noqa: BLE001
                     failed += 1
                     console.print(f"[red]失败[/red] {escape(str(archive_path))}: {escape(str(exc))}")
@@ -761,7 +772,7 @@ def _run_make(
     elapsed = max(0.0001, time.perf_counter() - started)
     fps = total_frames / elapsed
     console.print(f"[cyan]性能: {total_frames} 帧 / {elapsed:.2f}s = {fps:.2f} 帧/s[/cyan]")
-    console.print(f"[cyan]处理完成: 成功 {ok}，失败 {failed}，总计 {len(archives_found)}[/cyan]")
+    console.print(f"[cyan]处理完成: 成功 {ok}，跳过 {skipped}，失败 {failed}，总计 {len(archives_found)}[/cyan]")
 
 
 def _interactive_entry() -> None:
