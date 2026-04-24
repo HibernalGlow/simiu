@@ -262,6 +262,69 @@ def _count_image_entries(archive_path: Path) -> int:
     return count
 
 
+def _extract_single_image(archive_path: Path, output_path: Path, overwrite: bool) -> Path:
+    """从单图压缩包中提取唯一一张图片并保存到 output_path。
+
+    输出格式保持原图片格式不变（通过原始数据直接写入）。
+    返回实际输出路径。
+    """
+    if output_path.exists() and not overwrite:
+        raise FileExistsError(f"输出文件已存在: {output_path}")
+
+    low = archive_path.name.lower()
+    raw_data: bytes | None = None
+    inner_ext: str = ""
+
+    if low.endswith(".zip") or low.endswith(".cbz"):
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                inner = Path(info.filename)
+                if inner.suffix.lower() not in IMAGE_EXTS:
+                    continue
+                try:
+                    with zf.open(info, "r") as fp:
+                        raw_data = fp.read()
+                        inner_ext = inner.suffix.lower()
+                        break
+                except Exception:
+                    continue
+    elif any(
+        low.endswith(ext)
+        for ext in (".tar", ".tgz", ".tar.gz", ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+    ):
+        with tarfile.open(archive_path, "r:*") as tf:
+            for member in tf.getmembers():
+                if not member.isfile():
+                    continue
+                inner = Path(member.name)
+                if inner.suffix.lower() not in IMAGE_EXTS:
+                    continue
+                try:
+                    extracted = tf.extractfile(member)
+                    if extracted is None:
+                        continue
+                    raw_data = extracted.read()
+                    inner_ext = inner.suffix.lower()
+                    extracted.close()
+                    break
+                except Exception:
+                    continue
+
+    if raw_data is None:
+        raise ValueError("压缩包内未找到有效图片")
+
+    # 保持原格式扩展名
+    actual_output = output_path.with_suffix(inner_ext)
+    if actual_output.exists() and not overwrite:
+        raise FileExistsError(f"输出文件已存在: {actual_output}")
+
+    actual_output.parent.mkdir(parents=True, exist_ok=True)
+    actual_output.write_bytes(raw_data)
+    return actual_output
+
+
 def _load_frames_by_internal_order(archive_path: Path) -> tuple[list[Image.Image], int]:
     low = archive_path.name.lower()
     if low.endswith(".zip") or low.endswith(".cbz"):
@@ -597,6 +660,7 @@ def _run_make(
     max_workers: int | None,
     config: str | None,
     overwrite: bool,
+    extract_single: bool | None = None,
 ) -> None:
     app_config = load_config(config)
     if app_config.source_path is not None:
@@ -619,6 +683,7 @@ def _run_make(
     effective_prefix = name_prefix if name_prefix is not None else app_config.naming.prefix
     effective_template = name_template if name_template is not None else app_config.naming.template
     effective_out_mode = (out_mode or app_config.output.out_mode).lower()
+    effective_extract_single = extract_single if extract_single is not None else app_config.output.extract_single
     if effective_out_mode not in {"same", "separate"}:
         console.print("[red]out-mode 仅支持: same, separate[/red]")
         raise typer.Exit(2)
@@ -690,32 +755,64 @@ def _run_make(
 
     console.print(f"[blue]扫描完成，可处理压缩包: {len(archives_found)} 个[/blue]")
 
-    # 提前检测并跳过单图压缩包（不解码图片内容，仅按扩展名统计）
-    archives_to_process: list[Path] = []
-    pre_skipped = 0
-    for archive_path in archives_found:
-        img_count = _count_image_entries(archive_path)
-        if img_count < 2:
-            pre_skipped += 1
-            console.print(
-                f"[yellow]跳过[/yellow] {escape(str(archive_path))}: "
-                f"自动跳过单图压缩包（可用图片帧少于 2，无法生成动图）"
-            )
-        else:
-            archives_to_process.append(archive_path)
-    if pre_skipped > 0:
-        console.print(f"[yellow]预检跳过单图压缩包: {pre_skipped} 个[/yellow]")
-    if not archives_to_process:
-        console.print("[yellow]无有效多图压缩包可处理[/yellow]")
-        raise typer.Exit(0)
-
     target_ext = ".webp" if fmt == "auto" else f".{fmt}"
     output_root = Path(out_dir).expanduser().resolve() if out_dir else None
 
     # 计算 separate 模式需要的公共祖先目录
     common_root: Path | None = None
     if effective_out_mode == "separate":
-        common_root = _find_common_parent(archives_to_process)
+        common_root = _find_common_parent(archives_found)
+
+    # 提前检测单图压缩包：提取或跳过（不解码图片内容，仅按扩展名统计）
+    archives_to_process: list[Path] = []
+    pre_skipped = 0
+    extracted_single = 0
+    for archive_path in archives_found:
+        img_count = _count_image_entries(archive_path)
+        if img_count < 2:
+            if effective_extract_single:
+                # 提取单图并按命名模板重命名
+                output_path = _build_output_path(
+                    archive_path, output_root, target_ext,
+                    effective_template, effective_prefix, effective_out_mode, common_root,
+                )
+                try:
+                    actual_path = _extract_single_image(archive_path, output_path, overwrite)
+                    extracted_single += 1
+                    console.print(
+                        f"[green]提取[/green] {escape(str(archive_path))} -> "
+                        f"{escape(str(actual_path))} (单图提取)"
+                    )
+                except FileExistsError:
+                    pre_skipped += 1
+                    console.print(
+                        f"[yellow]跳过[/yellow] {escape(str(archive_path))}: "
+                        f"输出文件已存在: {escape(str(output_path))}"
+                    )
+                except Exception as exc:
+                    pre_skipped += 1
+                    console.print(
+                        f"[yellow]跳过[/yellow] {escape(str(archive_path))}: "
+                        f"单图提取失败: {escape(str(exc))}"
+                    )
+            else:
+                pre_skipped += 1
+                console.print(
+                    f"[yellow]跳过[/yellow] {escape(str(archive_path))}: "
+                    f"自动跳过单图压缩包（可用图片帧少于 2，无法生成动图）"
+                )
+        else:
+            archives_to_process.append(archive_path)
+    if extracted_single > 0:
+        console.print(f"[blue]单图提取: {extracted_single} 个[/blue]")
+    if pre_skipped > 0:
+        console.print(f"[yellow]预检跳过: {pre_skipped} 个[/yellow]")
+    if not archives_to_process and extracted_single == 0:
+        console.print("[yellow]无有效多图压缩包可处理[/yellow]")
+        raise typer.Exit(0)
+
+    # separate 模式提示
+    if effective_out_mode == "separate" and common_root is not None:
         if output_root is not None:
             console.print(
                 f"[blue]独立输出模式: 公共目录 {escape(str(common_root))} -> "
@@ -815,7 +912,7 @@ def _run_make(
     elapsed = max(0.0001, time.perf_counter() - started)
     fps = total_frames / elapsed
     console.print(f"[cyan]性能: {total_frames} 帧 / {elapsed:.2f}s = {fps:.2f} 帧/s[/cyan]")
-    console.print(f"[cyan]处理完成: 成功 {ok}，跳过 {skipped + pre_skipped}，失败 {failed}，总计 {len(archives_found)}[/cyan]")
+    console.print(f"[cyan]处理完成: 成功 {ok + extracted_single}（含单图提取 {extracted_single}），跳过 {skipped + pre_skipped}，失败 {failed}，总计 {len(archives_found)}[/cyan]")
 
 
 def _interactive_entry() -> None:
@@ -907,6 +1004,7 @@ def _interactive_entry() -> None:
     workers = int(Prompt.ask("并行线程数（0 自动）", default=str(app_config.performance.max_workers)))
     name_prefix = Prompt.ask("输出名前缀", default=app_config.naming.prefix)
     name_template = Prompt.ask("命名模板（可用 {prefix} {stem} {archive} {parent}）", default=app_config.naming.template)
+    extract_single = Confirm.ask("单图压缩包是否提取图片（跳过合并为动图）", default=app_config.output.extract_single)
     overwrite = Confirm.ask("输出已存在时是否覆盖", default=False)
 
     out_mode = Prompt.ask("输出模式", choices=["same", "separate"], default="same")
@@ -935,6 +1033,7 @@ def _interactive_entry() -> None:
         max_workers=workers,
         config=config_path,
         overwrite=overwrite,
+        extract_single=extract_single,
     )
 
 
@@ -961,6 +1060,7 @@ def make_command(
     name_prefix: str | None = typer.Option(None, "--name-prefix", help="输出名前缀，默认来自配置"),
     name_template: str | None = typer.Option(None, "--name-template", help="命名模板，默认来自配置"),
     overwrite: bool = typer.Option(False, "--overwrite", help="覆盖已存在的输出文件"),
+    extract_single: bool | None = typer.Option(None, "--extract-single/--no-extract-single", help="单图压缩包是否提取图片（跳过合并为动图），默认开启"),
 ) -> None:
     _run_make(
         archives=archives,
@@ -984,6 +1084,7 @@ def make_command(
         name_template=name_template,
         max_workers=max_workers,
         overwrite=overwrite,
+        extract_single=extract_single,
     )
 
 

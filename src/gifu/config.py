@@ -17,6 +17,7 @@ class OutputConfig:
     duration_ms: int = 120
     loop: int = 0
     out_mode: str = "same"
+    extract_single: bool = True
 
 
 @dataclass
@@ -188,6 +189,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
     raw_duration_ms = output_data.get("duration_ms", 120) if isinstance(output_data, dict) else 120
     raw_loop = output_data.get("loop", 0) if isinstance(output_data, dict) else 0
     raw_out_mode = output_data.get("out_mode", "same") if isinstance(output_data, dict) else "same"
+    raw_extract_single = output_data.get("extract_single", True) if isinstance(output_data, dict) else True
 
     raw_ffmpeg_threads = video_data.get("ffmpeg_threads", 0) if isinstance(video_data, dict) else 0
     raw_webm_crf = video_data.get("webm_crf", 34) if isinstance(video_data, dict) else 34
@@ -244,6 +246,8 @@ def load_config(config_path: str | None = None) -> AppConfig:
     except (TypeError, ValueError):
         max_workers = 0
 
+    extract_single = bool(raw_extract_single)
+
     return AppConfig(
         output=OutputConfig(
             format=_sanitize_format(str(raw_format)),
@@ -252,6 +256,7 @@ def load_config(config_path: str | None = None) -> AppConfig:
             duration_ms=_sanitize_duration_ms(duration_ms),
             loop=_sanitize_loop(loop),
             out_mode=_sanitize_out_mode(str(raw_out_mode)),
+            extract_single=extract_single,
         ),
         video=VideoConfig(
             ffmpeg_threads=_sanitize_threads(ffmpeg_threads),
