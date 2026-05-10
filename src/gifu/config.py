@@ -75,7 +75,7 @@ def _candidate_config_paths(explicit: str | None) -> list[Path]:
 
 def _sanitize_format(value: str) -> str:
     fmt = value.strip().lower()
-    if fmt not in {"gif", "webp", "apng", "webm", "mp4", "auto"}:
+    if fmt not in {"gif", "webp", "wbp", "apng", "webm", "mp4", "auto"}:
         return "webp"
     return fmt
 

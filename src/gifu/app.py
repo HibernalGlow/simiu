@@ -69,7 +69,7 @@ ARCHIVE_EXTS = {
     ".tar.xz",
     ".txz",
 }
-OUTPUT_FORMATS = {"gif", "webp", "apng", "webm", "mp4"}
+OUTPUT_FORMATS = {"gif", "webp", "wbp", "apng", "webm", "mp4"}
 
 console = Console(highlight=False)
 app = typer.Typer(
@@ -430,7 +430,7 @@ def _convert_one_archive(
                 disposal=2,
                 optimize=False,
             )
-        elif fmt == "webp":
+        elif fmt in {"webp", "wbp"}:
             first.save(
                 output_path,
                 format="WEBP",
